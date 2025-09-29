@@ -7,7 +7,7 @@ import MDAnalysis as mda
 import random
 import os 
 import pandas as pd
-home_dire=os.environ["WEST_SIM_ROOT"]
+home_dire='/home/smriti/BigStorage/gnm_voth_model/decamer'
 def move_dimer(u,space):
     #move to (0,0,0)
     #move to space with random orientation

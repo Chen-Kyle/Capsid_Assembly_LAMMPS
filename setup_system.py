@@ -7,7 +7,7 @@ import MDAnalysis as mda
 import random
 import os 
 import pandas as pd
-home_dire='/home/smriti/BigStorage/gnm_voth_model/decamer'
+home_dire=os.environ["WEST_SIM_ROOT"]
 def move_dimer(u,space):
     #move to (0,0,0)
     #move to space with random orientation
@@ -154,5 +154,8 @@ def contact_list_new(monomer_type,monomer_num,u,ubound):
         #print(mgroup.atoms)
         print(mgroup.ids)
         print(ngroup.ids)
-        native_contact_atoms.append((mgroup.ids[0],ngroup.ids[0]))
-    return native_contact_atoms  
+        if(len(mgroup.ids)!=0 and len(ngroup.ids)!=0):
+            native_contact_atoms.append((mgroup.ids[0],ngroup.ids[0]))
+        else:
+            return []
+        return native_contact_atoms  

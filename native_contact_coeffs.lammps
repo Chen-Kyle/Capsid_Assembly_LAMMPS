@@ -1,0 +1,7 @@
+# Gaussian native contact bond coefficients
+# E(r) = -Eatt*(A*exp(-B*r^2)+C*exp(-D*r^2)), tabulated to 30 Ang
+
+bond_coeff  3024  table  gaussian_native_A.table  GAUSSIAN_NC
+bond_coeff  3025  table  gaussian_native_B.table  GAUSSIAN_NC
+bond_coeff  3026  table  gaussian_native_C.table  GAUSSIAN_NC
+bond_coeff  3027  table  gaussian_native_D.table  GAUSSIAN_NC

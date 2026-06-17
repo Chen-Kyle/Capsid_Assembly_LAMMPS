@@ -4,21 +4,20 @@
 # Unit system: real  (Angstroms, kcal/mol, femtoseconds, Kelvin, g/mol)
 #
 # Prerequisites — run the data-file generator first:
-#   python generate_lammps_data.py \
-#       --pdb   decamer_sep.pdb   \
-#       --bound decamer_avg.pdb   \
-#       --conndir connect_files   \
-#       --contactdir .            \
-#       --Enative 1.0
+#   python generate_lammps_data_backup.py \
+#       --pdb        decamer_sep.pdb   \
+#       --conndir    connect_files     \
+#       --contactdir .                 \
+#       --Enative    1.0
 #
 # This produces:
-#   decamer.lammps                    atom/bond topology
-#   gaussian_native_{A,B,C,D}.table   tabulated Gaussian potentials
-#   harmonic_bond_coeffs.lammps       bond_coeff lines for ENM bonds
-#   native_contact_coeffs.lammps      bond_coeff lines for native contacts
+#   decamer.lammps                      atom/bond topology (one type per chain+resnum)
+#   gaussian_native_{A,B,C,D}.table     tabulated Gaussian potentials
+#   harmonic_bond_coeffs.lammps         bond_coeff lines for ENM bonds
+#   native_contact_pair_coeffs.lammps   pair_coeff lines for native contacts
 #
 # Run:
-#   lmp -in lammps_oligomer.in -var Erepulsion 1.0 -var Enative 1.0 -var seed 42
+#   lmp -in lammps_oligomer.in -var nsteps 10000 -var Erepulsion 1.0 -var nsteps 10000000 -var seed 42
 #
 # NOTE: Enative is baked into the Gaussian table files at generation time.
 # To use a different Enative, rerun generate_lammps_data.py --Enative <value>.
@@ -27,71 +26,48 @@
 # ---------------------------------------------------------------------------
 # INPUT PARAMETERS  (override via -var on the command line)
 # ---------------------------------------------------------------------------
-variable    Erepulsion  equal 1.0   # dimensionless scale on cosine repulsion
-variable    myseed        equal 42    # Langevin random seed
+variable    Erepulsion  index 1.0     # dimensionless scale on cosine repulsion
+variable    myseed      index 42      # Langevin random seed
+variable    nsteps      index 10000000
 
 # Cosine repulsion amplitude:
 #   0.1184 kJ/mol × 0.239006 kcal/kJ = 0.028278 kcal/mol per unit Erepulsion
-variable    A_soft  equal ${Erepulsion}*0.028278   # kcal/mol
+#   0.0282 kcal/mol is too small
+variable    A_soft  equal ${Erepulsion}*10   # kcal/mol
 
 # ---------------------------------------------------------------------------
 # SIMULATION BOX AND TOPOLOGY
 # ---------------------------------------------------------------------------
 units       real
 atom_style  bond
-boundary    f f f           # non-periodic; matches OpenMM CutoffNonPeriodic
+boundary    p p p   # Periodic Boundary Conditions          
 
 read_data   decamer.lammps
 
-# Ghost-atom communication cutoff must exceed the bond table outer cutoff (300 Å).
-# In the separated initial structure native-contact atoms can be >100 Å apart;
-# bond_style table requires all bond lengths to lie within the table range.
-comm_modify cutoff 305.0
-
-# Average amino-acid residue mass for all CG beads (g/mol)
-mass        * 110.0
-
 # ---------------------------------------------------------------------------
-# PAIR STYLE: soft cosine excluded-volume repulsion
+# PAIR STYLE: hybrid/overlay
+#   soft     — cosine excluded-volume repulsion on ALL pairs
+#   table    — Gaussian native contact attraction on contact type pairs only
 #
-#   E(r) = A × (1 + cos(π r / r_nc))   for r < r_nc = 15 Å
-#
-# This is the exact LAMMPS equivalent of the OpenMM CustomNonbondedForce:
-#   energy_scale*(1 + cos((PI*r)/r_nc))
-# with r_nc = 1.5 nm = 15 Å and A = Erepulsion × 0.1184 kJ/mol (in kcal/mol here).
-#
-# All atom pairs — including bonded ones — see the full repulsion.
-# special_bonds lj 1 1 1 disables the default exclusion of 1-2/1-3/1-4 pairs,
-# matching the OpenMM setup where no exclusions are added to the repulsion force.
+# soft: E(r) = A × (1 + cos(π r / r_nc))  for r < r_nc = 1.5 Å
+# special_bonds lj 1 1 1 keeps 1-2/1-3/1-4 bonded pairs in the neighbor list,
+# matching the OpenMM setup (no exclusions on the repulsion force).
 # ---------------------------------------------------------------------------
-pair_style  soft 15.0
-pair_coeff  * *  ${A_soft}
+pair_style  hybrid/overlay soft 4 table linear 20000
+pair_coeff  * *  soft ${A_soft} 4
+include     native_contact_pair_coeffs.lammps
 
 special_bonds lj 1 1 1
 
 # ---------------------------------------------------------------------------
-# BOND STYLE: hybrid harmonic (ENM) + table (Gaussian native contacts)
-#
-# Harmonic ENM bonds (within each dimer):
+# BOND STYLE: harmonic ENM bonds only
 #   E(r) = K (r - r0)²
-#   K = 41840 kJ/(mol·nm²) ÷ 2 × 0.239006 kcal/kJ ÷ (10 Å/nm)² = 50.0 kcal/mol/Å²
-#   (factor of 2: OpenMM HarmonicBondForce uses k/2 × (r-r0)²; LAMMPS omits the ½)
-#   r0 per bond from PDB geometry (one bond type per unique equilibrium distance)
-#
-# Gaussian native contacts (inter-dimer interface pairs):
-#   E(r) = -Eatt × [A exp(-B r²) + C exp(-D r²)]   for r < r_ncg = 30 Å
-#   A = 4.6  kJ/mol = 1.0994 kcal/mol,  B = 10.0 nm⁻² = 0.10 Å⁻²
-#   C = 8.368 kJ/mol = 1.9997 kcal/mol,  D = 1.0 nm⁻²  = 0.01 Å⁻²
-#   Eatt per interface: A×1.17, B×1.11, C×1.30, D×1.00  (× Enative)
-#   Tabulated in gaussian_native_{A,B,C,D}.table
+#   K = 50.0 kcal/mol/Å²  (one bond type per unique r0)
+# Native contacts are now pair interactions — no table bonds.
 # ---------------------------------------------------------------------------
-bond_style  hybrid harmonic table linear 1000
+bond_style  harmonic
 
-# ENM harmonic bond coefficients (one line per unique r0, written by generator)
 include     harmonic_bond_coeffs.lammps
-
-# Tabulated Gaussian native contact bond coefficients
-include     native_contact_coeffs.lammps
 
 # ---------------------------------------------------------------------------
 # INTEGRATOR: Langevin dynamics
@@ -110,8 +86,8 @@ fix     LANG all langevin 300.0 300.0 500.0 ${myseed}
 # ---------------------------------------------------------------------------
 minimize    1.0e-4 1.0e-6 10000 100000
 
-write_data  minimized.lammps nocoeff
-write_dump  all custom minimized.lammpstrj id type xu yu zu modify sort id
+write_data  minimized_backup.lammps nocoeff
+write_dump  all custom minimized_backup.lammpstrj id type xu yu zu modify sort id
 
 reset_timestep 0
 
@@ -119,7 +95,7 @@ reset_timestep 0
 # PRODUCTION OUTPUT  (matches DCD every 5000 steps + StateDataReporter every 5000)
 # ---------------------------------------------------------------------------
 dump        TRAJ all dcd 5000 seg.dcd
-dump_modify TRAJ unwrap yes
+# dump_modify TRAJ unwrap yes
 
 thermo_style custom step ke pe etotal temp
 thermo      5000
@@ -127,7 +103,7 @@ thermo      5000
 # ---------------------------------------------------------------------------
 # PRODUCTION RUN  (matches simulation.step(10000))
 # ---------------------------------------------------------------------------
-run         1000000
+run         ${nsteps}
 
 write_data    seg_final.lammps nocoeff
 write_restart seg.restart

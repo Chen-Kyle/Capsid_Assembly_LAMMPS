@@ -11,7 +11,6 @@ Reads the same source files as run_oligomer_simulation.py and writes:
 Usage:
     python generate_lammps_data.py \
         --pdb      /path/to/decamer_sep.pdb  \
-        --bound    /path/to/decamer_avg.pdb  \
         --conndir  /path/to/connect_files    \
         --contactdir /path/to/contacts       \
         --Enative  1.0
@@ -23,6 +22,14 @@ import numpy as np
 import pandas as pd
 import MDAnalysis as mda
 
+job_id = os.environ.get("SLURM_JOB_ID")
+if job_id != None:
+    os.makedirs(job_id, exist_ok=True)
+    job_id = f"{job_id}/"
+    print("SLURM_JOB_ID found")
+else:
+    job_id = ""
+    print("No SLURM_JOB_ID found")
 # ---------------------------------------------------------------------------
 # Unit conversions and physical constants
 # ---------------------------------------------------------------------------
@@ -44,6 +51,13 @@ R_CUT_G = 3.0   * NM_TO_ANG          # 30.0 Å    (3.0 nm)
 # Eatt prefactor per interface type (multiplied by Enative)
 INTERFACE_SCALE = {'A': 1.17, 'B': 1.11, 'C': 1.30, 'D': 1.00}
 
+# Right-column chain type for each contacts file (derived from spatial query exclusions)
+#   A_contacts.txt : A chain contacts A chain
+#   B_contacts.txt : B chain contacts C chain  (D excluded in original query)
+#   C_contacts.txt : C chain contacts D chain  (A and B excluded, not-D{mn} leaves D other)
+#   D_contacts.txt : D chain contacts B chain  (C and A excluded)
+CONTACT_PARTNER_CHAIN = {'A': 'A', 'B': 'C', 'C': 'D', 'D': 'B'}
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -52,11 +66,9 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument('--pdb',        default='decamer_sep.pdb',
                    help='Simulation-start PDB (separated decamer)')
-    p.add_argument('--bound',      default='decamer_avg.pdb',
-                   help='Bound-state PDB (used to identify native contact partners)')
     p.add_argument('--conndir',    default='connect_files',
                    help='Directory containing cg_*_connectivity.txt files')
-    p.add_argument('--contactdir', default='.',
+    p.add_argument('--contactdir', default='contact_files',
                    help='Directory containing A_contacts.txt … D_contacts.txt')
     p.add_argument('--Enative',    type=float, default=1.0,
                    help='Native contact energy scale (multiplies all Gaussian Eatt)')
@@ -91,12 +103,15 @@ def detect_dimer_list(u_sim):
     interleaved AB/CD as in the original decamer setup.
     """
     segids = set(u_sim.select_atoms('name CA').segids)
+    n_segs = len(u_sim.select_atoms('name CA'))
+    n_dimers = int(n_segs/596) + 2
     dimer_list = []
-    for i in range(1, 100):
+    for i in range(1, n_dimers):
         if f'A{i}' in segids and f'B{i}' in segids:
             dimer_list.append(f'A{i}B{i}')
         if f'C{i}' in segids and f'D{i}' in segids:
             dimer_list.append(f'C{i}D{i}')
+    print(dimer_list)
     return dimer_list
 
 
@@ -112,12 +127,17 @@ def build_harmonic_bonds(u_sim, dimer_list, conndir):
 
     bonds = []
     offset = 0
+    i0 = 0
+    j0 = 0
+    loop_runs = 0
+    dname = ""
     for dname in dimer_list:
         letters = [c for c in dname if c.isalpha()]
         numbers = [c for c in dname if c.isdigit()]
         seg1 = letters[0] + numbers[0]   # e.g. 'A1'
         seg2 = letters[1] + numbers[1]   # e.g. 'B1'
-        n_dimer = len(ca.select_atoms(f'segid {seg1} or segid {seg2}'))
+        print(f"segid1: {seg1}   segid2: {seg2}")
+        n_dimer = 298 #len(ca.select_atoms(f'segid {seg1} or segid {seg2}'))
 
         conn_file = _find_conn_file(conndir, dname)
         # columns: local_atom1 local_atom2 [flag] (1-indexed within dimer)
@@ -129,91 +149,65 @@ def build_harmonic_bonds(u_sim, dimer_list, conndir):
             j0 = offset + row[1] - 1
             r0 = float(np.linalg.norm(pos[j0] - pos[i0]))
             bonds.append((i0, j0, r0))
-
+        
+        # print(f"n_dimer: {n_dimer}    dname: {dname}")
+        # loop_runs += 1
         offset += n_dimer
+
     return bonds
 
 # ---------------------------------------------------------------------------
-# Native contact builder  (mirrors setup_system.contact_list_new)
+# Native contact builder
 # ---------------------------------------------------------------------------
 
-def _partner_segid_A(monomer_num):
-    if (monomer_num - 1) % 5 == 0:
-        return f'A{monomer_num + 4}'
-    return f'A{monomer_num - 1}'
-
-
-def _contact_pairs_for_monomer(iface, mn, u_sim, ubound, contactdir):
+def build_atom_type_map(u_sim):
     """
-    Returns list of (i0, j0) 0-based indices into u_sim CA atoms,
-    or [] if this interface/monomer combination has no contacts.
+    Assigns a unique LAMMPS atom type to each (chain_letter, resnum) combination.
+    chain_letter is the first character of the segid (e.g. 'A' from 'A1').
+
+    Returns:
+      type_map -- dict: (chain_letter, resnum) -> [list of 0-based atom indices]
+                  All atoms sharing a (chain, resnum) key get the same LAMMPS type.
+                  LAMMPS type number = enumeration position in the dict (1-based).
     """
-    # Identify partner segment from the bound-state structure
-    if iface == 'A':
-        partner_seg = _partner_segid_A(mn)
-        sle = ubound.select_atoms(f'segid {partner_seg}')
-    elif iface == 'B':
-        sle = ubound.select_atoms(
-            f'(around 9 segid B{mn}) and not chainID D and not segid A{mn}')
-    elif iface == 'C':
-        sle = ubound.select_atoms(
-            f'(around 9 segid C{mn}) and not chainID A '
-            f'and not chainID B and not segid D{mn}')
-    elif iface == 'D':
-        sle = ubound.select_atoms(
-            f'(around 9 segid D{mn}) and not chainID C and not chainID A')
-    else:
-        return []
-
-    unique_segs = list(set(sle.segids))
-    if not unique_segs:
-        return []
-    partner_seg = unique_segs[0]
-    m1 = f'{iface}{mn}'
-
-    contact_file = os.path.join(contactdir, f'{iface}_contacts.txt')
-    if not os.path.exists(contact_file):
-        raise FileNotFoundError(f'Contact file not found: {contact_file}')
-    clist = pd.read_csv(contact_file, sep='\t', header=None)
-
-    pairs = []
-    for _, row in clist.iterrows():
-        res1, res2 = int(row[1]), int(row[3])
-        g1 = u_sim.select_atoms(f'segid {m1} and resid {res1} and name CA')
-        g2 = u_sim.select_atoms(f'segid {partner_seg} and resid {res2} and name CA')
-        if len(g1) == 0 or len(g2) == 0:
-            return []
-        # MDAnalysis ids are 1-based; subtract 1 for 0-based index
-        pairs.append((int(g1.ids[0]) - 1, int(g2.ids[0]) - 1))
-    return pairs
+    ca = u_sim.select_atoms('name CA')
+    type_map = {}
+    for atom in ca:
+        key = (atom.segid[0], atom.resid)
+        if key not in type_map:
+            type_map[key] = []
+        type_map[key].append(int(atom.id) - 1)
+    return type_map
 
 
-def build_native_contacts(u_sim, ubound, contactdir):
+def build_native_contacts(contactdir):
     """
-    Return dict {'A': [(i0,j0), ...], 'B': [...], 'C': [...], 'D': [...]}.
-    Monomer numbers are detected from the PDB segIDs, so this works for any
-    oligomeric state without needing to iterate up to an arbitrary maximum.
-    """
-    segids = set(u_sim.select_atoms('name CA').segids)
-    monomer_nums = sorted({
-        int(''.join(c for c in s if c.isdigit()))
-        for s in segids if s and any(c.isdigit() for c in s)
-    })
+    Returns contacts dict keyed by interface ('A','B','C','D').
+    Each value is a list of (chain1, resnum1, chain2, resnum2) tuples.
 
-    contacts = {t: [] for t in 'ABCD'}
+    Any atom on chain1 at resnum1 can attract any atom on chain2 at resnum2
+    regardless of which specific monomer it belongs to. This allows 
+    self-assembly with arbitrary numbers of dimers.
+    """
+    cols = ['resname1', 'resnum1', 'resname2', 'resnum2', 'dist', 'score']
+    contacts = {iface: [] for iface in 'ABCD'}
     for iface in 'ABCD':
-        for mn in monomer_nums:
-            pairs = _contact_pairs_for_monomer(iface, mn, u_sim, ubound, contactdir)
-            contacts[iface].extend(pairs)
+        partner = CONTACT_PARTNER_CHAIN[iface]
+        clist = pd.read_csv(f"{contactdir}/{iface}_contacts.txt",
+                            sep=r'\s+', header=None, names=cols)
+        for _, row in clist.iterrows():
+            contacts[iface].append(
+                (iface, int(row['resnum1']), partner, int(row['resnum2']))
+            )
     return contacts
 
 # ---------------------------------------------------------------------------
 # Gaussian bond potential tables
 # ---------------------------------------------------------------------------
 
-TABLE_R_MAX = 300.0   # Å — must exceed the maximum initial inter-dimer separation
+TABLE_R_MAX = 32.0    # Å — slightly above R_CUT_G (30 Å); pair_style uses this as neighbor cutoff
 
-def write_gaussian_table(filename, Eatt_kcal, n_points=15000):
+def write_gaussian_table(filename, Eatt_kcal, n_points=20000):
     """
     Write a LAMMPS bond_style table file for the Gaussian native contact.
 
@@ -225,14 +219,15 @@ def write_gaussian_table(filename, Eatt_kcal, n_points=15000):
     the separated initial structure.  With 15000 points the spacing is ~0.02 Å,
     giving ~1450 non-zero points in the physical 0–30 Å range.
     """
-    r_vals = np.linspace(0.5, TABLE_R_MAX, n_points)
-
+    r_vals = np.linspace(0.001, TABLE_R_MAX, n_points)
+    r_cut = 8 # Angstroms -  from Smiriti's thesis
+    Eatt_kcal = 0
     with open(filename, 'w') as f:
         f.write(
             f'# Gaussian native contact potential\n'
             f'# E(r) = -Eatt*(A*exp(-B*r^2)+C*exp(-D*r^2)) for r <= {R_CUT_G:.1f} Ang, else 0\n'
             f'# Eatt={Eatt_kcal:.6f}  A={A_GAUSS:.6f}  C={C_GAUSS:.6f}'
-            f'  B={B_GAUSS:.6f}  D={D_GAUSS:.6f}\n'
+            f'  B={B_GAUSS:.6f}  D={D_GAUSS:.6f}  r_cut={r_cut}\n'
             f'#\n'
             f'GAUSSIAN_NC\n'
             f'N {n_points}\n\n'
@@ -241,31 +236,45 @@ def write_gaussian_table(filename, Eatt_kcal, n_points=15000):
             if r >= R_CUT_G:
                 E, F = 0.0, 0.0
             else:
-                gA = A_GAUSS * np.exp(-B_GAUSS * r**2)
-                gC = C_GAUSS * np.exp(-D_GAUSS * r**2)
+                dr = r - r_cut
+                gA = A_GAUSS * np.exp(-B_GAUSS * dr**2)
+                gC = C_GAUSS * np.exp(-D_GAUSS * dr**2)
                 E  = -Eatt_kcal * (gA + gC)
-                # F = -dE/dr; dE/dr = Eatt * 2r * (B*gA + D*gC)
-                F  = -Eatt_kcal * 2.0 * r * (B_GAUSS * gA + D_GAUSS * gC)
+                # F = -dE/dr; dE/dr = Eatt * 2*(r-r_cut) * (B*gA + D*gC)
+                F  = -Eatt_kcal * 2.0 * dr * (B_GAUSS * gA + D_GAUSS * gC)
             f.write(f'{idx:6d}  {r:12.6f}  {E:16.10f}  {F:16.10f}\n')
 
 # ---------------------------------------------------------------------------
 # LAMMPS data file writer
 # ---------------------------------------------------------------------------
 
-def write_lammps_data(outfile, positions_ang, harmonic_bonds, native_contacts):
+def write_lammps_data(outfile, positions_ang, harmonic_bonds, type_map, atom_to_molid):
     """
-    Write the LAMMPS data file and return (n_harm_types, iface_to_btype).
+    Write the LAMMPS data file.
 
-    Bond type scheme:
-      1 … N_harm   : harmonic ENM bonds (one type per unique r0, rounded to 4 dp)
-      N_harm+1     : Gaussian native contact, A interface
-      N_harm+2     : Gaussian native contact, B interface
-      N_harm+3     : Gaussian native contact, C interface
-      N_harm+4     : Gaussian native contact, D interface
+    LAMMPS type number for each (chain_letter, resnum) key is its 1-based
+    position in type_map (insertion order, guaranteed in Python 3.7+).
+    Atoms sharing a key get the same type — monomer-agnostic by design.
+
+    atom_to_molid: {0-based atom index -> mol_id} so that neigh_modify
+    exclude molecule/intra all suppresses intra-chain A-A self-interactions.
+
+    Only harmonic ENM bonds are written. Native contacts are pair interactions
+    written separately by write_native_contact_pair_coeffs.
+
+    Returns r0_to_type: {r0_val: bond_type_int} for write_harmonic_coeffs.
     """
-    n_atoms = len(positions_ang)
+    # Build atom_index -> lammps_type from type_map enumeration order
+    key_to_ltype = {key: i for i, key in enumerate(type_map, start=1)}
+    atom_to_ltype = {}
+    for key, atom_ids in type_map.items():
+        ltype = key_to_ltype[key]
+        for aid in atom_ids:
+            atom_to_ltype[aid] = ltype
 
-    # Assign a unique harmonic bond type per unique equilibrium distance
+    n_atoms      = len(positions_ang)
+    n_atom_types = len(type_map)
+
     r0_to_type = {}
     harm_typed = []
     for (i0, j0, r0) in harmonic_bonds:
@@ -273,47 +282,39 @@ def write_lammps_data(outfile, positions_ang, harmonic_bonds, native_contacts):
         if key not in r0_to_type:
             r0_to_type[key] = len(r0_to_type) + 1
         harm_typed.append((i0, j0, r0_to_type[key]))
-    n_harm_types = len(r0_to_type)
+    n_bond_types = len(r0_to_type)
+    n_bonds      = len(harm_typed)
 
-    # Native contact bond types follow the harmonic types
-    iface_to_btype = {iface: n_harm_types + k
-                      for k, iface in enumerate('ABCD', start=1)}
-
-    all_bonds = list(harm_typed)   # (i0, j0, btype)
-    for iface, pairs in native_contacts.items():
-        btype = iface_to_btype[iface]
-        for (i0, j0) in pairs:
-            all_bonds.append((i0, j0, btype))
-
-    n_bond_types = n_harm_types + 4
-    n_bonds = len(all_bonds)
-
-    # Box: extend coordinates by 10 Å padding on each side
-    lo = positions_ang.min(axis=0) - 10.0
-    hi = positions_ang.max(axis=0) + 10.0
+    lo = positions_ang.min(axis=0) - 100.0
+    hi = positions_ang.max(axis=0) + 100.0
 
     with open(outfile, 'w') as f:
-        f.write('LAMMPS data file: HBV decamer CG oligomer\n\n')
+        f.write('LAMMPS data file: HBV capsid CG Go model\n\n')
         f.write(f'{n_atoms} atoms\n')
         f.write(f'{n_bonds} bonds\n\n')
-        f.write(f'1 atom types\n')
+        f.write(f'{n_atom_types} atom types\n')
         f.write(f'{n_bond_types} bond types\n\n')
         f.write(f'{lo[0]:.4f} {hi[0]:.4f} xlo xhi\n')
         f.write(f'{lo[1]:.4f} {hi[1]:.4f} ylo yhi\n')
         f.write(f'{lo[2]:.4f} {hi[2]:.4f} zlo zhi\n\n')
 
-        f.write('Masses\n\n1 110.0\n\n')
+        f.write('Masses\n\n')
+        for t in range(1, n_atom_types + 1):
+            f.write(f'{t}  110.0\n')
+        f.write('\n')
 
         f.write('Atoms  # bond  (atom_id mol_id atom_type x y z)\n\n')
         for aid, (x, y, z) in enumerate(positions_ang, start=1):
-            f.write(f'{aid:6d}  1  1  {x:12.6f}  {y:12.6f}  {z:12.6f}\n')
+            atype  = atom_to_ltype[aid - 1]
+            molid  = atom_to_molid[aid - 1]
+            f.write(f'{aid:6d}  {molid}  {atype:4d}  {x:12.6f}  {y:12.6f}  {z:12.6f}\n')
         f.write('\n')
 
         f.write('Bonds\n\n')
-        for bid, (i0, j0, btype) in enumerate(all_bonds, start=1):
+        for bid, (i0, j0, btype) in enumerate(harm_typed, start=1):
             f.write(f'{bid:8d}  {btype:6d}  {i0+1:6d}  {j0+1:6d}\n')
 
-    return n_harm_types, iface_to_btype
+    return r0_to_type
 
 # ---------------------------------------------------------------------------
 # Include-file writers
@@ -322,21 +323,65 @@ def write_lammps_data(outfile, positions_ang, harmonic_bonds, native_contacts):
 def write_harmonic_coeffs(filename, r0_to_type):
     with open(filename, 'w') as f:
         f.write('# ENM harmonic bond coefficients\n')
-        f.write('# bond_coeff N harmonic K(kcal/mol/Ang^2) r0(Ang)\n')
+        f.write('# bond_coeff N  harmonic  K(kcal/mol/Ang^2)  r0(Ang)\n')
         f.write(f'# K = {K_HARM:.4f} kcal/mol/Ang^2 for all harmonic bonds\n\n')
         for r0_val, btype in sorted(r0_to_type.items(), key=lambda x: x[1]):
-            f.write(f'bond_coeff  {btype}  harmonic  {K_HARM:.4f}  {r0_val:.4f}\n')
+            f.write(f'bond_coeff  {btype}  {K_HARM:.4f}  {r0_val:.4f}\n')
 
 
-def write_native_contact_coeffs(filename, iface_to_btype):
+def write_native_contact_pair_coeffs(filename, contacts, type_map):
+    """
+    Write pair_coeff entries for all native contact type pairs.
+    type_map keys are (chain_letter, resnum); LAMMPS type = 1-based position in dict.
+    Any atom whose key maps to type1 attracts any atom whose key maps to type2,
+    regardless of which specific monomer they belong to.
+    """
+    key_to_ltype = {key: i for i, key in enumerate(type_map, start=1)}
+
     with open(filename, 'w') as f:
-        f.write('# Gaussian native contact bond coefficients\n')
-        f.write('# E(r) = -Eatt*(A*exp(-B*r^2)+C*exp(-D*r^2)), tabulated to 30 Ang\n\n')
-        for iface, btype in iface_to_btype.items():
-            f.write(
-                f'bond_coeff  {btype}  table  '
-                f'gaussian_native_{iface}.table  GAUSSIAN_NC\n'
-            )
+        
+        f.write('# NB: This file does not reflect the change made which negates ex: A1 A1 interactions\n')
+        f.write('# Gaussian native contact pair coefficients\n')
+        f.write('# pair_coeff type1 type2 table <file> GAUSSIAN_NC\n\n')
+        seen = set()
+        for iface, pairs in contacts.items():
+            fname = f'gaussian_native_{iface}.table'
+            for (chain1, res1, chain2, res2) in pairs:
+                t1 = key_to_ltype.get((chain1, res1))
+                t2 = key_to_ltype.get((chain2, res2))
+                if t1 is None or t2 is None:
+                    continue
+                key = (min(t1, t2), max(t1, t2))
+                if key in seen:
+                    continue
+                seen.add(key)
+                f.write(f'pair_coeff  {t1}  {t2}  table  {fname}  GAUSSIAN_NC\n')
+
+# ---------------------------------------------------------------------------
+# PDB connectivity writer
+# ---------------------------------------------------------------------------
+
+def write_connectivity_to_pdb(conn_data, pdb_file, cutoff_distance):
+    '''
+    Write out bond connectivity to a new pdb file along with CA positions.
+    For now do this manually, eventually we should use MDAnalysis for more complicated situations
+    '''
+    with open(pdb_file, 'r') as f:
+        old_pdb_lines = f.readlines()
+
+    if not any(l.startswith('CONECT') for l in old_pdb_lines):
+        new_pdb_file = pdb_file.replace('.pdb', f'_with_connectivity_cutoff={cutoff_distance}.pdb')
+        with open(new_pdb_file, 'w') as f:
+            for line in old_pdb_lines[:-1]:
+                f.write(line)
+            for i in range(conn_data.shape[0]):
+                # This logic will fail when the number of atoms exceeds 1m since there will no 
+                # longer be enough space to write out the full serial id of the atom
+                f.write(f'CONECT{int(conn_data[i][0]):5d}{int(conn_data[i][1]):5d}\n')
+            f.write(old_pdb_lines[-1])
+        print(f'  Written: {new_pdb_file}')
+    else:
+        print('PDB file already has CONECT information. Not adding any.')
 
 # ---------------------------------------------------------------------------
 # Main
@@ -346,15 +391,11 @@ def main():
     args = parse_args()
 
     print(f'Reading simulation PDB: {args.pdb}')
-    u_sim   = mda.Universe(args.pdb)
-    ca      = u_sim.select_atoms('name CA')
-    positions = ca.positions.copy()   # Å
+    u_sim     = mda.Universe(args.pdb)
+    ca        = u_sim.select_atoms('name CA')
+    positions = ca.positions.copy()
     print(f'  {len(positions)} CA atoms')
 
-    print(f'Reading bound-state PDB: {args.bound}')
-    ubound = mda.Universe(args.bound)
-
-    # Auto-detect dimer list from PDB segIDs (works for any oligomeric state)
     dimer_list = detect_dimer_list(u_sim)
     if not dimer_list:
         raise ValueError(
@@ -366,37 +407,45 @@ def main():
     harmonic_bonds = build_harmonic_bonds(u_sim, dimer_list, args.conndir)
     print(f'  {len(harmonic_bonds)} bonds')
 
+    print('Writing PDB with bond connectivity...')
+    conn_data = np.array([[i0 + 1, j0 + 1] for (i0, j0, _) in harmonic_bonds])
+    write_connectivity_to_pdb(conn_data, args.pdb, 'from_connectivity_files')
+
     print('Building native contacts...')
-    native_contacts = build_native_contacts(u_sim, ubound, args.contactdir)
+    native_contacts = build_native_contacts(args.contactdir)
+    print("  Loaded pattern possibilities (expected 20 per interface)")
     for iface, pairs in native_contacts.items():
-        print(f'  Interface {iface}: {len(pairs)} contact pairs')
+        print(f'  Interface {iface}: {len(pairs)} contact patterns')
+
+    print('Building atom type map...')
+    type_map = build_atom_type_map(u_sim)
+    print(f'  {len(type_map)} unique (chain, resnum) atom types')
+
+    segid_to_molid = {s: i for i, s in enumerate(sorted(set(ca.segids)), start=1)}
+    atom_to_molid  = {int(atom.id) - 1: segid_to_molid[atom.segid] for atom in ca}
+    print(f'  {len(segid_to_molid)} chains → mol IDs: {segid_to_molid}')
 
     print('Writing Gaussian potential tables...')
     for iface, scale in INTERFACE_SCALE.items():
         Eatt = scale * args.Enative
         fname = f'gaussian_native_{iface}.table'
         write_gaussian_table(fname, Eatt)
-        print(f'  {fname}  (Eatt = {Eatt:.4f} kcal/mol, scale = {scale}×{args.Enative})')
+        print(f'  {fname}  (Eatt = {Eatt:.4f} kcal/mol)')
 
     print(f'Writing LAMMPS data file: {args.output}')
-    n_harm_types, iface_to_btype = write_lammps_data(
-        args.output, positions, harmonic_bonds, native_contacts)
-    print(f'  {n_harm_types} harmonic bond types, 4 Gaussian bond types')
-    print(f'  {len(harmonic_bonds) + sum(len(v) for v in native_contacts.values())} total bonds')
+    r0_to_type = write_lammps_data(
+        args.output, positions, harmonic_bonds, type_map, atom_to_molid)
+    print(f'  {len(r0_to_type)} harmonic bond types')
+    print(f'  {len(type_map)} atom types (one per chain-letter + resnum combination)')
 
     print('Writing harmonic_bond_coeffs.lammps...')
-    r0_to_type = {}
-    for (i0, j0, r0) in harmonic_bonds:
-        key = round(r0, 4)
-        if key not in r0_to_type:
-            r0_to_type[key] = len(r0_to_type) + 1
     write_harmonic_coeffs('harmonic_bond_coeffs.lammps', r0_to_type)
 
-    print('Writing native_contact_coeffs.lammps...')
-    write_native_contact_coeffs('native_contact_coeffs.lammps', iface_to_btype)
+    print('Writing native_contact_pair_coeffs.lammps...')
+    write_native_contact_pair_coeffs(
+        'native_contact_pair_coeffs.lammps', native_contacts, type_map)
 
-    print('\nDone. To run:')
-    print(f'  lmp -in lammps_oligomer.in -var Erepulsion 1.0 -var seed 42')
+    print('\nDone.')
 
 
 if __name__ == '__main__':

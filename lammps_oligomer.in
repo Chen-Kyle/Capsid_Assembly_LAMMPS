@@ -95,7 +95,7 @@ reset_timestep 0
 # ---------------------------------------------------------------------------
 # PRODUCTION OUTPUT  (matches DCD every 5000 steps + StateDataReporter every 5000)
 # ---------------------------------------------------------------------------
-dump        TRAJ all dcd 5000 seg.dcd
+dump        TRAJ all dcd 5000 ${output_dir}/seg.dcd
 # dump_modify TRAJ unwrap yes
 
 thermo_style custom step ke pe etotal temp

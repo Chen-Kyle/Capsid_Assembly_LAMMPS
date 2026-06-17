@@ -25,7 +25,7 @@
 #   ${SLURM_JOB_ID}/native_contact_pair_coeffs.lammps (--type hybrid only)
 #
 # Importantly the trajectory file is:
-#   ${SLURM_JOB_ID}/seg.dcd
+#   ${SCRATCH}${SLURM_JOB_ID}/seg.dcd
 
 #conda activate westpa2
 # Number of seeds passed as first argument (default 5)
@@ -33,7 +33,6 @@ nseed=1
 
 # PDB files (adjust paths if yours differ)
 PDB="important_oligomer_pdbs/abcd_capsid.pdb" #"important_oligomer_pdbs/cg_ABCD_separate.pdb"
-BOUND="important_oligomer_pdbs/abcd_capsid.pdb" #"important_oligomer_pdbs/cg_ABCD_avg.pdb"
 
 # Output directory
 output_dir="${SCRATCH}${SLURM_JOB_ID}"
@@ -42,7 +41,7 @@ output_dir="${SCRATCH}${SLURM_JOB_ID}"
 Enative_vals=(1.0)
 
 # Simulation length in timesteps (10 fs each, so 1000000 = 10 ns)
-NSTEPS=1000000
+nsteps=1000000
 
 # ---------------------------------------------------------------------------
 # Main loop: for each Enative, run nseed independent simulations
@@ -56,14 +55,15 @@ echo "$(printf '%0.s-' {1..100})"
 
 python generate_lammps_data.py  \
     --pdb    "${PDB}"           \
-    --bound  "${BOUND}"         \
     --output_dir "${output_dir}"\
 
 echo -e "Finished running generate_lammps_data.py\n"
 echo "$(printf '%0.s-' {1..100})"
-echo -e "\nmpirun -n 8 lmp -in lammps_oligomer.in -var output_dir ${output_dir} -var nsteps ${nsteps}}"
+echo -e "\nmpirun -n 8 lmp -in lammps_oligomer.in -var output_dir ${output_dir} -var nsteps ${nsteps}\n"
 echo "$(printf '%0.s-' {1..100})"
 
-time mpirun -n 8 lmp -in lammps_oligomer.in -var output_dir ${output_dir} -var nsteps ${nsteps}
+time mpirun -n 8 lmp -in lammps_oligomer.in  \
+    -var output_dir ${output_dir}            \
+    -var nsteps ${nsteps}                    \
 
 echo "All runs complete."

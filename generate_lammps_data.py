@@ -321,6 +321,9 @@ def write_lammps_data(outfile, positions_ang, harmonic_bonds, type_map, atom_to_
 # ---------------------------------------------------------------------------
 
 def write_harmonic_coeffs(filename, r0_to_type):
+    """
+    Writes a reference file for lammps to quickly reference"""
+
     with open(filename, 'w') as f:
         f.write('# ENM harmonic bond coefficients\n')
         f.write('# bond_coeff N  harmonic  K(kcal/mol/Ang^2)  r0(Ang)\n')
@@ -445,8 +448,7 @@ def main():
     print(f'Writing {args.output_dir}/harmonic_bond_coeffs.lammps...')
     write_harmonic_coeffs(f'{args.output_dir}/harmonic_bond_coeffs.lammps', r0_to_type)
 
-    write_native_contact_pair_coeffs(
-        args.output_dir, native_contacts, type_map)
+    write_native_contact_pair_coeffs(args.output_dir, native_contacts, type_map)
 
     print('\nDone.')
 

@@ -72,7 +72,7 @@ def parse_args():
                    help='Directory containing A_contacts.txt … D_contacts.txt')
     p.add_argument('--Enative',    type=float, default=1.0,
                    help='Native contact energy scale (multiplies all Gaussian Eatt)')
-    p.add_argument('--output',     default='decamer.lammps',
+    p.add_argument('--output_dir',     default='lammps_out',
                    help='Output LAMMPS data file name')
     return p.parse_args()
 
@@ -285,8 +285,8 @@ def write_lammps_data(outfile, positions_ang, harmonic_bonds, type_map, atom_to_
     n_bond_types = len(r0_to_type)
     n_bonds      = len(harm_typed)
 
-    lo = positions_ang.min(axis=0) - 100.0
-    hi = positions_ang.max(axis=0) + 100.0
+    lo = positions_ang.min(axis=0) - 50.0
+    hi = positions_ang.max(axis=0) + 50.0
 
     with open(outfile, 'w') as f:
         f.write('LAMMPS data file: HBV capsid CG Go model\n\n')
@@ -329,7 +329,7 @@ def write_harmonic_coeffs(filename, r0_to_type):
             f.write(f'bond_coeff  {btype}  {K_HARM:.4f}  {r0_val:.4f}\n')
 
 
-def write_native_contact_pair_coeffs(filename, contacts, type_map):
+def write_native_contact_pair_coeffs(output_dir, contacts, type_map):
     """
     Write pair_coeff entries for all native contact type pairs.
     type_map keys are (chain_letter, resnum); LAMMPS type = 1-based position in dict.
@@ -338,14 +338,17 @@ def write_native_contact_pair_coeffs(filename, contacts, type_map):
     """
     key_to_ltype = {key: i for i, key in enumerate(type_map, start=1)}
 
-    with open(filename, 'w') as f:
+    outfile = f'{output_dir}/native_contact_pair_coeffs.lammps'
+    print(f'Writing {outfile}...')
+
+    with open(outfile, 'w') as f:
         
         f.write('# NB: This file does not reflect the change made which negates ex: A1 A1 interactions\n')
         f.write('# Gaussian native contact pair coefficients\n')
         f.write('# pair_coeff type1 type2 table <file> GAUSSIAN_NC\n\n')
         seen = set()
         for iface, pairs in contacts.items():
-            fname = f'gaussian_native_{iface}.table'
+            fname = f'{output_dir}/gaussian_native_{iface}.table'
             for (chain1, res1, chain2, res2) in pairs:
                 t1 = key_to_ltype.get((chain1, res1))
                 t2 = key_to_ltype.get((chain2, res2))
@@ -389,6 +392,7 @@ def write_connectivity_to_pdb(conn_data, pdb_file, cutoff_distance):
 
 def main():
     args = parse_args()
+    os.makedirs(args.output_dir, exist_ok=True)
 
     print(f'Reading simulation PDB: {args.pdb}')
     u_sim     = mda.Universe(args.pdb)
@@ -428,22 +432,21 @@ def main():
     print('Writing Gaussian potential tables...')
     for iface, scale in INTERFACE_SCALE.items():
         Eatt = scale * args.Enative
-        fname = f'gaussian_native_{iface}.table'
+        fname = f'{args.output_dir}/gaussian_native_{iface}.table'
         write_gaussian_table(fname, Eatt)
         print(f'  {fname}  (Eatt = {Eatt:.4f} kcal/mol)')
 
-    print(f'Writing LAMMPS data file: {args.output}')
+    print(f'Writing LAMMPS data file: {args.output_dir}/decamer.lammps')
     r0_to_type = write_lammps_data(
-        args.output, positions, harmonic_bonds, type_map, atom_to_molid)
+        f'{args.output_dir}/decamer.lammps', positions, harmonic_bonds, type_map, atom_to_molid)
     print(f'  {len(r0_to_type)} harmonic bond types')
     print(f'  {len(type_map)} atom types (one per chain-letter + resnum combination)')
 
-    print('Writing harmonic_bond_coeffs.lammps...')
-    write_harmonic_coeffs('harmonic_bond_coeffs.lammps', r0_to_type)
+    print(f'Writing {args.output_dir}/harmonic_bond_coeffs.lammps...')
+    write_harmonic_coeffs(f'{args.output_dir}/harmonic_bond_coeffs.lammps', r0_to_type)
 
-    print('Writing native_contact_pair_coeffs.lammps...')
     write_native_contact_pair_coeffs(
-        'native_contact_pair_coeffs.lammps', native_contacts, type_map)
+        args.output_dir, native_contacts, type_map)
 
     print('\nDone.')
 

@@ -17,7 +17,7 @@
 #   native_contact_pair_coeffs.lammps   pair_coeff lines for native contacts
 #
 # Run:
-#   lmp -in lammps_oligomer.in -var nsteps 10000 -var Erepulsion 1.0 -var nsteps 10000000 -var seed 42
+#   lmp -in lammps_oligomer.in -var nsteps 10000 -var output_dir {out_dir} -var nsteps 10000000 -var seed 42
 #
 # NOTE: Enative is baked into the Gaussian table files at generation time.
 # To use a different Enative, rerun generate_lammps_data.py --Enative <value>.
@@ -26,9 +26,10 @@
 # ---------------------------------------------------------------------------
 # INPUT PARAMETERS  (override via -var on the command line)
 # ---------------------------------------------------------------------------
-variable    Erepulsion  index 1.0     # dimensionless scale on cosine repulsion
-variable    myseed      index 42      # Langevin random seed
-variable    nsteps      index 10000000
+variable    Erepulsion  index 1.0      # dimensionless scale on cosine repulsion
+variable    myseed      index 42       # Langevin random seed
+variable    nsteps      index 10000000 # number of time steps
+variable    output_dir  index ""       # name of desired output directory
 
 # Cosine repulsion amplitude:
 #   0.1184 kJ/mol × 0.239006 kcal/kJ = 0.028278 kcal/mol per unit Erepulsion
@@ -42,7 +43,7 @@ units       real
 atom_style  bond
 boundary    p p p   # Periodic Boundary Conditions          
 
-read_data   decamer.lammps
+read_data   ${output_dir}/decamer.lammps
 
 # ---------------------------------------------------------------------------
 # PAIR STYLE: hybrid/overlay
@@ -55,7 +56,7 @@ read_data   decamer.lammps
 # ---------------------------------------------------------------------------
 pair_style  hybrid/overlay soft 4 table linear 20000
 pair_coeff  * *  soft ${A_soft} 4
-include     native_contact_pair_coeffs.lammps
+include     ${output_dir}/native_contact_pair_coeffs.lammps
 
 special_bonds lj 1 1 1
 
@@ -67,7 +68,7 @@ special_bonds lj 1 1 1
 # ---------------------------------------------------------------------------
 bond_style  harmonic
 
-include     harmonic_bond_coeffs.lammps
+include     ${output_dir}/harmonic_bond_coeffs.lammps
 
 # ---------------------------------------------------------------------------
 # INTEGRATOR: Langevin dynamics

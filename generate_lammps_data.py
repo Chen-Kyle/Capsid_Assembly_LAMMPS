@@ -22,14 +22,6 @@ import numpy as np
 import pandas as pd
 import MDAnalysis as mda
 
-job_id = os.environ.get("SLURM_JOB_ID")
-if job_id != None:
-    os.makedirs(job_id, exist_ok=True)
-    job_id = f"{job_id}/"
-    print("SLURM_JOB_ID found")
-else:
-    job_id = ""
-    print("No SLURM_JOB_ID found")
 # ---------------------------------------------------------------------------
 # Unit conversions and physical constants
 # ---------------------------------------------------------------------------
@@ -81,6 +73,10 @@ def parse_args():
 # ---------------------------------------------------------------------------
 
 def _find_conn_file(conndir, dname):
+    """
+    Looks at the name of a dimer like 'A1B1' and then returns the correct path
+    to its respective connectivity file
+    """
     letters = [c for c in dname if c.isalpha()]
     mtype = ''.join(letters)           # 'AB' or 'CD'
     candidates = [
@@ -136,7 +132,6 @@ def build_harmonic_bonds(u_sim, dimer_list, conndir):
         numbers = [c for c in dname if c.isdigit()]
         seg1 = letters[0] + numbers[0]   # e.g. 'A1'
         seg2 = letters[1] + numbers[1]   # e.g. 'B1'
-        print(f"segid1: {seg1}   segid2: {seg2}")
         n_dimer = 298 #len(ca.select_atoms(f'segid {seg1} or segid {seg2}'))
 
         conn_file = _find_conn_file(conndir, dname)
@@ -149,11 +144,8 @@ def build_harmonic_bonds(u_sim, dimer_list, conndir):
             j0 = offset + row[1] - 1
             r0 = float(np.linalg.norm(pos[j0] - pos[i0]))
             bonds.append((i0, j0, r0))
-        
-        # print(f"n_dimer: {n_dimer}    dname: {dname}")
-        # loop_runs += 1
-        offset += n_dimer
 
+        offset += n_dimer
     return bonds
 
 # ---------------------------------------------------------------------------
@@ -209,7 +201,7 @@ TABLE_R_MAX = 32.0    # Å — slightly above R_CUT_G (30 Å); pair_style uses t
 
 def write_gaussian_table(filename, Eatt_kcal, n_points=20000):
     """
-    Write a LAMMPS bond_style table file for the Gaussian native contact.
+    Writes a LAMMPS bond_style table file for the Gaussian native contact.
 
     E(r) = -Eatt × [A_G exp(-B_G r²) + C_G exp(-D_G r²)]  for r ≤ R_CUT_G (30 Å)
          = 0                                                  for r > R_CUT_G
@@ -250,7 +242,7 @@ def write_gaussian_table(filename, Eatt_kcal, n_points=20000):
 
 def write_lammps_data(outfile, positions_ang, harmonic_bonds, type_map, atom_to_molid):
     """
-    Write the LAMMPS data file.
+    Writes decamer.lammps the LAMMPS data file.
 
     LAMMPS type number for each (chain_letter, resnum) key is its 1-based
     position in type_map (insertion order, guaranteed in Python 3.7+).
@@ -322,7 +314,8 @@ def write_lammps_data(outfile, positions_ang, harmonic_bonds, type_map, atom_to_
 
 def write_harmonic_coeffs(filename, r0_to_type):
     """
-    Writes a reference file for lammps to quickly reference"""
+    Writes harmonic_bond_coeff which stores bond information for LAMMPS to initialize from
+    """
 
     with open(filename, 'w') as f:
         f.write('# ENM harmonic bond coefficients\n')
@@ -334,7 +327,7 @@ def write_harmonic_coeffs(filename, r0_to_type):
 
 def write_native_contact_pair_coeffs(output_dir, contacts, type_map):
     """
-    Write pair_coeff entries for all native contact type pairs.
+    Writes pair_coeff entries for all native contact type pairs.
     type_map keys are (chain_letter, resnum); LAMMPS type = 1-based position in dict.
     Any atom whose key maps to type1 attracts any atom whose key maps to type2,
     regardless of which specific monomer they belong to.

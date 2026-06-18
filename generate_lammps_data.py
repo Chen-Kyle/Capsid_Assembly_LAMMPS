@@ -213,7 +213,6 @@ def write_gaussian_table(filename, Eatt_kcal, n_points=20000):
     """
     r_vals = np.linspace(0.001, TABLE_R_MAX, n_points)
     r_cut = 8 # Angstroms -  from Smiriti's thesis
-    Eatt_kcal = 0
     with open(filename, 'w') as f:
         f.write(
             f'# Gaussian native contact potential\n'

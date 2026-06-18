@@ -108,3 +108,7 @@ run         ${nsteps}
 
 write_data    seg_final.lammps nocoeff
 write_restart seg.restart
+
+print "------------------------------------------------------------"
+print "Trajectory dumped to: ${output_dir}/seg.dcd"
+print "------------------------------------------------------------"

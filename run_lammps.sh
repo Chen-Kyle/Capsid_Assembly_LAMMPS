@@ -42,7 +42,7 @@ pdb_default="important_oligomer_pdbs/abcd_capsid.pdb" #"important_oligomer_pdbs/
 PDB=${2:-${pdb_default}}
 
 # Output directory
-output_dir="${SCRATCH}HBV_emm/${SLURM_JOB_ID}"
+output_dir="${SCRATCH}HBV_enm/${SLURM_JOB_ID}"
 
 # Enative (default value = 1.0)
 Enative=${3:-1}
@@ -50,8 +50,9 @@ Enative=${3:-1}
 # Simulation length in timesteps (10 fs each timestep)
 nsteps=${4:-100000000}
 
+
 # ---------------------------------------------------------------------------
-# Main loop: for each Enative, run nseed independent simulations
+# Generates the LAMMPS files
 # ---------------------------------------------------------------------------
 
 # Generate shared input files for this Enative value.
@@ -65,6 +66,11 @@ python generate_lammps_data.py  \
     --output_dir "${output_dir}"\
     --Enative "${Enative}"      \
 
+
+# ---------------------------------------------------------------------------
+# Runs the LAMMPS simulation
+# ---------------------------------------------------------------------------
+
 echo -e "Finished running generate_lammps_data.py\n"
 echo "$(printf '%0.s-' {1..100})"
 echo -e "\nmpirun -n 8 lmp -in lammps_oligomer.in -var myseed ${seed} -var nsteps ${nsteps} -var output_dir ${output_dir}\n"
@@ -75,4 +81,10 @@ time mpirun -n 8 lmp -in lammps_oligomer.in  \
     -var nsteps ${nsteps}                    \
     -var myseed ${seed}                      \
 
+
+# ---------------------------------------------------------------------------
+# Logs results
+# ---------------------------------------------------------------------------
+
 echo "All runs complete."
+echo $(date) JOBID:${SLURM_JOB_ID}     Output Directory:$output_dir     PDB File:$PDB     Enative:$Enative     Seed Num:$seed >> $WEST_SIM_ROOT/master.log

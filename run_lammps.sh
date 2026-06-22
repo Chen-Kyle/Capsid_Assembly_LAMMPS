@@ -11,6 +11,12 @@
 # WARNING!: MAY NOT WORK WITHOUT INITIALIZING SLURM_JOB_ID
 # HBV Decamer CG Oligomer Simulation
 #
+# Command line arguements in order are:
+#         1. Seed number
+#         2. PDB file path
+#         3. Enative value
+#         4. Number of timesteps
+#
 # This script runs both:
 #         generate_lammps_data.py
 #         decamer.lammps
@@ -29,19 +35,20 @@
 
 #conda activate westpa2
 # Number of seeds passed as first argument (default 5)
-nseed=1
+seed=${1:-42}
 
 # PDB files (adjust paths if yours differ)
-PDB="important_oligomer_pdbs/abcd_capsid.pdb" #"important_oligomer_pdbs/cg_ABCD_separate.pdb"
+pdb_default="important_oligomer_pdbs/abcd_capsid.pdb" #"important_oligomer_pdbs/cg_ABCD_separate.pdb"
+PDB=${2:-${pdb_default}}
 
 # Output directory
-output_dir="${SCRATCH}${SLURM_JOB_ID}"
+output_dir="${SCRATCH}HBV_emm/${SLURM_JOB_ID}"
 
-# Enative values to sweep
-Enative_vals=(1.0)
+# Enative (default value = 1.0)
+Enative=${3:-1}
 
-# Simulation length in timesteps (10 fs each, so 1000000 = 10 ns)
-nsteps=1000000
+# Simulation length in timesteps (10 fs each timestep)
+nsteps=${4:-100000000}
 
 # ---------------------------------------------------------------------------
 # Main loop: for each Enative, run nseed independent simulations
@@ -50,20 +57,22 @@ nsteps=1000000
 # Generate shared input files for this Enative value.
 # --type hybrid uses standard pair_style table — compatible with 2018 module.
 echo "$(printf '%0.s-' {1..100})"
-echo -e "\npython generate_lammps_data.py --pdb ${PDB} --output_dir ${output_dir}\n"
+echo -e "\npython generate_lammps_data.py --Enative ${Enative} --pdb ${PDB} --output_dir ${output_dir}\n"
 echo "$(printf '%0.s-' {1..100})"
 
 python generate_lammps_data.py  \
     --pdb    "${PDB}"           \
     --output_dir "${output_dir}"\
+    --Enative "${Enative}"      \
 
 echo -e "Finished running generate_lammps_data.py\n"
 echo "$(printf '%0.s-' {1..100})"
-echo -e "\nmpirun -n 8 lmp -in lammps_oligomer.in -var output_dir ${output_dir} -var nsteps ${nsteps}\n"
+echo -e "\nmpirun -n 8 lmp -in lammps_oligomer.in -var myseed ${seed} -var nsteps ${nsteps} -var output_dir ${output_dir}\n"
 echo "$(printf '%0.s-' {1..100})"
 
 time mpirun -n 8 lmp -in lammps_oligomer.in  \
     -var output_dir ${output_dir}            \
     -var nsteps ${nsteps}                    \
+    -var myseed ${seed}                      \
 
 echo "All runs complete."

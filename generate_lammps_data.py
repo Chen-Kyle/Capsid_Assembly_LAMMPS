@@ -168,7 +168,7 @@ def build_atom_type_map(u_sim):
         key = (atom.segid[0], atom.resid)
         if key not in type_map:
             type_map[key] = []
-        type_map[key].append(int(atom.id) - 1)
+        type_map[key].append(atom.index)
     return type_map
 
 
@@ -421,7 +421,7 @@ def main():
     print(f'  {len(type_map)} unique (chain, resnum) atom types')
 
     segid_to_molid = {s: i for i, s in enumerate(sorted(set(ca.segids)), start=1)}
-    atom_to_molid  = {int(atom.id) - 1: segid_to_molid[atom.segid] for atom in ca}
+    atom_to_molid  = {atom.index: segid_to_molid[atom.segid] for atom in ca}
     print(f'  {len(segid_to_molid)} chains → mol IDs: {segid_to_molid}')
 
     print('Writing Gaussian potential tables...')

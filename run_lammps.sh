@@ -5,10 +5,9 @@
 #SBATCH --ntasks-per-node=8
 #SBATCH --output=slurm_%j.out
 #SBATCH --error=slurm_%j.err
+#SBATCH --nodelist=compute-9-0
 
 
-
-# WARNING!: MAY NOT WORK WITHOUT INITIALIZING SLURM_JOB_ID
 # HBV Decamer CG Oligomer Simulation
 #
 # Command line arguements in order are:
@@ -41,14 +40,21 @@ seed=${1:-42}
 pdb_default="important_oligomer_pdbs/abcd_capsid.pdb" #"important_oligomer_pdbs/cg_ABCD_separate.pdb"
 PDB=${2:-${pdb_default}}
 
-# Output directory
-output_dir="${SCRATCH}HBV_enm/${SLURM_JOB_ID}"
-
 # Enative (default value = 1.0)
 Enative=${3:-1}
 
 # Simulation length in timesteps (10 fs each timestep)
 nsteps=${4:-100000000}
+
+# Output directory
+output_dir_top_level=${5:"${SCRATCH}HBV_enm/"}
+output_dir="${output_dir_top_level}${SLURM_JOB_ID}"
+
+# ---------------------------------------------------------------------------
+# Logs simulation data
+# ---------------------------------------------------------------------------
+
+echo $(date) JOBID:${SLURM_JOB_ID}     Output Directory:$output_dir     PDB File:$PDB     Enative:$Enative     Seed Num:$seed >> master.log
 
 
 # ---------------------------------------------------------------------------
@@ -76,15 +82,10 @@ echo "$(printf '%0.s-' {1..100})"
 echo -e "\nmpirun -n 8 lmp -in lammps_oligomer.in -var myseed ${seed} -var nsteps ${nsteps} -var output_dir ${output_dir}\n"
 echo "$(printf '%0.s-' {1..100})"
 
+# The default value for large systems is 8 but for <1000 atoms it should be 1
 time mpirun -n 8 lmp -in lammps_oligomer.in  \
     -var output_dir ${output_dir}            \
     -var nsteps ${nsteps}                    \
     -var myseed ${seed}                      \
 
-
-# ---------------------------------------------------------------------------
-# Logs results
-# ---------------------------------------------------------------------------
-
-echo "All runs complete."
-echo $(date) JOBID:${SLURM_JOB_ID}     Output Directory:$output_dir     PDB File:$PDB     Enative:$Enative     Seed Num:$seed >> $WEST_SIM_ROOT/master.log
+echo "Run complete."

@@ -37,6 +37,8 @@ import MDAnalysis as mda
 
 warnings.filterwarnings("ignore")
 
+HBV_ENM_PATH = os.environ.get("HBV_ENM_PATH", "/home/kyle/2026_Research/HBV_enm")
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -46,9 +48,9 @@ def parse_args():
         description="Build an FCC lattice from two PDB subunits (AB and CD).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    p.add_argument("--ab",            default='important_oligomer_pdbs/cg_A1B1_avg.pdb',
+    p.add_argument("--ab",            default=f'{HBV_ENM_PATH}/scripts/important_oligomer_pdbs/cg_A1B1_avg.pdb',
                     help="PDB file for AB subunit")
-    p.add_argument("--cd",            default='important_oligomer_pdbs/cg_C1D1_avg.pdb',
+    p.add_argument("--cd",            default=f'{HBV_ENM_PATH}/scripts/important_oligomer_pdbs/cg_C1D1_avg.pdb',
                    help="PDB file for CD subunit")
     p.add_argument("--lattice-param", default=100,  type=float,
                    help="Cubic lattice spacing parameter in Angstroms (> length of subunit = 85Å)")
@@ -56,7 +58,7 @@ def parse_args():
                    help="Box length in Angstroms (> length of subunit = 85Å)")
     p.add_argument("--N",            default=20,      type=int,
                    help="Number of subunits (should be a multiple of 2 for an equal number of dimers per dimer type)")
-    p.add_argument("--output_dir",        default="lattice_pdbs",
+    p.add_argument("--output_dir",        default=f"{HBV_ENM_PATH}/scripts/lattice_pdbs",
                    help="Output PDB directory")
     p.add_argument("--center",        action="store_true",
                    help="Center the lattice at the origin before writing")

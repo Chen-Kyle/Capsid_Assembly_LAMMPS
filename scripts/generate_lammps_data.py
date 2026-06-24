@@ -2,7 +2,7 @@
 generate_lammps_data.py
 Generates all LAMMPS input files needed by lammps_oligomer.in.
 
-Reads the same source files as run_oligomer_simulation.py and writes:
+Reads the same source files as Smiriti's original OpenMM and writes:
     decamer.lammps                   -- atom positions + bond topology
     gaussian_native_{A,B,C,D}.table  -- tabulated Gaussian pair potentials
     harmonic_bond_coeffs.lammps      -- bond_coeff lines for ENM harmonic bonds
@@ -21,6 +21,8 @@ import os
 import numpy as np
 import pandas as pd
 import MDAnalysis as mda
+
+HBV_ENM_PATH = os.environ.get("HBV_ENM_PATH", "/home/kyle/2026_Research/HBV_enm")
 
 # ---------------------------------------------------------------------------
 # Unit conversions and physical constants
@@ -58,13 +60,13 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument('--pdb',        default='decamer_sep.pdb',
                    help='Simulation-start PDB (separated decamer)')
-    p.add_argument('--conndir',    default='connect_files',
+    p.add_argument('--conndir',    default=f'{HBV_ENM_PATH}/scripts/connect_files',
                    help='Directory containing cg_*_connectivity.txt files')
-    p.add_argument('--contactdir', default='contact_files',
+    p.add_argument('--contactdir', default=f'{HBV_ENM_PATH}/scripts/contact_files',
                    help='Directory containing A_contacts.txt … D_contacts.txt')
     p.add_argument('--Enative',    type=float, default=1.0,
                    help='Native contact energy scale (multiplies all Gaussian Eatt)')
-    p.add_argument('--output_dir',     default='lammps_out',
+    p.add_argument('--output_dir',     default=f'{HBV_ENM_PATH}/scripts/lammps_out',
                    help='Output LAMMPS data file name')
     return p.parse_args()
 

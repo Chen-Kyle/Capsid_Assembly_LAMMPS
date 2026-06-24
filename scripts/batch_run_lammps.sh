@@ -15,7 +15,7 @@
 seed_vals=(42)
 
 # PDB files (adjust paths if yours differ)
-PDB="important_oligomer_pdbs/cg_ABCD_avg.pdb" #"important_oligomer_pdbs/cg_ABCD_separate.pdb"
+PDB="${HBV_ENM_PATH}/scripts/important_oligomer_pdbs/cg_ABCD_avg.pdb" #"important_oligomer_pdbs/cg_ABCD_separate.pdb"
 
 # Output directory
 # output_dir="${SCRATCH}HBV_enm/${SLURM_JOB_ID}" (set in run_lammps.sh)
@@ -29,7 +29,7 @@ nsteps=1000000
 
 # Output directory
 output_tag="Enative"
-output_dir_top_level="${SCRATCH}HBV_enm/${output_tag}/${SLURM_JOB_ID}"
+output_dir_top_level="${SCRATCH}/HBV_enm/${output_tag}/${SLURM_JOB_ID}"
 
 # ---------------------------------------------------------------------------
 # Main loop: for each Enative, run nseed independent simulations

@@ -22,10 +22,11 @@
 # Number of seeds passed as first argument (default 5)
 nseed=1
 
-PDB="important_oligomer_pdbs/abcd_capsid.pdb" #"important_oligomer_pdbs/cg_ABCD_separate.pdb"
-output_dir="lammps_out"
+PDB="${HBV_ENM_PATH}/scripts/lattice_pdbs/lattice=cubic_Ndimers=20.pdb" #"important_oligomer_pdbs/cg_ABCD_separate.pdb"
+output_dir="${HBV_ENM_PATH}/scripts/lammps_out"
 Enative_vals=(1.0)
 nsteps=1000000
+#nsteps=100000000
 
 # ---------------------------------------------------------------------------
 # Main loop: for each Enative, run nseed independent simulations
@@ -33,11 +34,12 @@ nsteps=1000000
 
 # Generates the LAMMPS files
 echo "$(printf '%0.s-' {1..100})"
-echo -e "\npython generate_lammps_data.py --pdb ${PDB} --output_dir ${output_dir}\n"
+echo -e "\npython generate_lammps_data.py --pdb ${PDB} --output_dir ${output_dir} --Enative ${Enative}\n"
 echo "$(printf '%0.s-' {1..100})"
 python generate_lammps_data.py  \
-    --pdb    "${PDB}"           \
+    --pdb        "${PDB}"       \
     --output_dir "${output_dir}"\
+    --Enative    "${Enative}"   \
 
 # Runs the LAMMPS simulation
 echo -e "Finished running generate_lammps_data.py\n"

@@ -87,8 +87,8 @@ fix     LANG all langevin 300.0 300.0 500.0 ${myseed}
 # ---------------------------------------------------------------------------
 minimize    1.0e-4 1.0e-6 10000 100000
 
-write_data  minimized_backup.lammps nocoeff
-write_dump  all custom minimized_backup.lammpstrj id type xu yu zu modify sort id
+write_data  minimized.lammps nocoeff
+write_dump  all custom minimized.lammpstrj id type xu yu zu modify sort id
 
 reset_timestep 0
 

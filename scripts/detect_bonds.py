@@ -24,6 +24,31 @@ from collections import defaultdict
 import warnings
 warnings.filterwarnings("ignore")
 
+HBV_ENM_PATH = os.environ.get("HBV_ENM_PATH", "/home/kyle/2026_Research/HBV_enm")
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def parse_args():
+    p = argparse.ArgumentParser()
+    p.add_argument('--pdb',        default=f'{HBV_ENM_PATH}/important_oligomer_pdbs/cg_ABCD_separate.pdb',
+                   help='Simulation-start PDB (separated decamer)')
+    p.add_argument('--traj',
+                   help='trajectory file for pdb')
+    p.add_argument('--contactdir', default=f'{HBV_ENM_PATH}/scripts/contact_files',
+                   help='Directory containing A_contacts.txt … D_contacts.txt')
+    p.add_argument('--cutoff',    type=float, default=8.0,
+                   help='Sets cutoff distance for identifying bonds')
+    p.add_argument('--output_dir',     default=f'{HBV_ENM_PATH}/raw_data',
+                   help='Output directory for bond analysis data')
+    return p.parse_args()
+
+
+# ---------------------------------------------------------------------------
+# Bond Constuction Functions
+# ---------------------------------------------------------------------------
+
 # Right-column chain type for each contacts file (derived from spatial query exclusions)
 #   A_contacts.txt : A chain contacts A chain
 #   B_contacts.txt : B chain contacts C chain  (D excluded in original query)
@@ -92,30 +117,12 @@ def parse_frames(cutoff, pdb_file, traj_file, contact_dir):
 
     return iface_contacts, type_data
 
-    # # Parses through every frame for every contact present in every interface
-    # for frame in range(Nframes):
-    #     print(f'Frame: {frame}')
-    #     u.trajectory[frame]
-    #     for iface, pairs in contacts.items():
-    #         for (chain1, res1, chain2, res2) in pairs:
-    #             atoms1 = u.select_atoms(f'resnum {res1}')
-    #             atoms2 = u.select_atoms(f'resnum {res2}')
-    #             for atom1 in atoms1:
-    #                 pos1 = atom1.position
-    #                 chain_id1 = atom1.segid
-    #                 for atom2 in atoms2:
-    #                     pos2 = atom2.position
-    #                     chain_id2 = atom2.segid
-    #                     distance = mda.lib.distances.calc_bonds(pos1, pos2, box=u.dimensions)
-    #                     if (distance < cutoff and chain_id1 != chain_id2):
-    #                         iface_contacts[frame][(chain_id1, chain_id2)] += 1
-    #                         type_data[frame][iface].append((res1, res2))
-
-
 if __name__ == "__main__":
     pdb_file = "/home/kyle/2026_Research/HBV_enm/important_oligomer_pdbs/cg_ABCD_separate.pdb"
     traj_file = "/home/kyle/2026_Research/trajectory_files/ABCD_seg.dcd"
     contact_dir = "/home/kyle/2026_Research/HBV_enm/contact_files"
-    iface_contacts, type_data = parse_frames(7, pdb_file, traj_file, contact_dir)
+    
+    args = parse_args()
+    iface_contacts, type_data = parse_frames(args.cutoff, args.pdb, args.traj, args.contactdir)
     print(iface_contacts)
     print(type_data)

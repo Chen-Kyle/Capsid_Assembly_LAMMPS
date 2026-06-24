@@ -35,6 +35,8 @@ import MDAnalysis as mda
 
 warnings.filterwarnings("ignore")
 
+HBV_ENM_PATH= os.environ.get("HBV_ENM_PATH", "/home/kyle/2026_Research/HBV_enm")
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -44,15 +46,15 @@ def parse_args():
         description="Build an FCC lattice from two PDB subunits (AB and CD).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    p.add_argument("--ab",            default='important_oligomer_pdbs/cg_A1B1_avg.pdb',
+    p.add_argument("--ab",            default=f'{HBV_ENM_PATH}/scripts/important_oligomer_pdbs/cg_A1B1_avg.pdb',
                     help="PDB file for AB subunit")
-    p.add_argument("--cd",            default='important_oligomer_pdbs/cg_C1D1_avg.pdb',
+    p.add_argument("--cd",            default=f'{HBV_ENM_PATH}/scripts/important_oligomer_pdbs/cg_C1D1_avg.pdb',
                    help="PDB file for CD subunit")
     p.add_argument("--lattice-param", default=100,  type=float,
                    metavar="A",       help="FCC lattice parameter in Angstroms (> length of subunit = 85Å)")
     p.add_argument("--nl",            default=5,      type=int,
                    help="Unit cells along length (1:4  2:32  3:108  4:256  5:500...)")
-    p.add_argument("--output_dir",        default="lattice_pdbs",
+    p.add_argument("--output_dir",        default=f'{HBV_ENM_PATH}/scripts/lattice_pdbs',
                    help="Output PDB directory")
     p.add_argument("--center",        action="store_true",
                    help="Center the lattice at the origin before writing")
@@ -222,8 +224,6 @@ def build_lattice(
     print(f"  Box dimensions:  {box_x:.3f} × {box_y:.3f} × {box_z:.3f} Å")
     print(f"  AB copies (chains {sorted(ab_chain_map.values())}): {ab_count}")
     print(f"  CD copies (chains {sorted(cd_chain_map.values())}): {cd_count}")
-
-
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------

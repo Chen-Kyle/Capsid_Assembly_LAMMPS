@@ -37,7 +37,7 @@
 seed=${1:-42}
 
 # PDB files (adjust paths if yours differ)
-pdb_default="important_oligomer_pdbs/abcd_capsid.pdb" #"important_oligomer_pdbs/cg_ABCD_separate.pdb"
+pdb_default="${HBV_ENM_PATH}/scripts/important_oligomer_pdbs/abcd_capsid.pdb" #"important_oligomer_pdbs/cg_ABCD_separate.pdb"
 PDB=${2:-${pdb_default}}
 
 # Enative (default value = 1.0)
@@ -47,7 +47,7 @@ Enative=${3:-1}
 nsteps=${4:-100000000}
 
 # Output directory
-output_dir_top_level=${5:"${SCRATCH}HBV_enm/"}
+output_dir_top_level=${5:"${SCRATCH}/HBV_enm/"}
 output_dir="${output_dir_top_level}${SLURM_JOB_ID}"
 
 # ---------------------------------------------------------------------------

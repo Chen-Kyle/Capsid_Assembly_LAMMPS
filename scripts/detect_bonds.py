@@ -19,6 +19,7 @@ import os
 import numpy as np
 import pandas as pd
 import MDAnalysis as mda
+import matplotlib.pyplot as plt
 from collections import defaultdict
 
 import warnings
@@ -32,9 +33,9 @@ HBV_ENM_PATH = os.environ.get("HBV_ENM_PATH", "/home/kyle/2026_Research/HBV_enm"
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument('--pdb',        default=f'{HBV_ENM_PATH}/important_oligomer_pdbs/cg_ABCD_separate.pdb',
+    p.add_argument('--pdb',        default=f'{HBV_ENM_PATH}/scripts/important_oligomer_pdbs/cg_ABCD_separate.pdb',
                    help='Simulation-start PDB (separated decamer)')
-    p.add_argument('--traj',
+    p.add_argument('--traj',       default=f'{HBV_ENM_PATH}/trajectory_files/ABCD_seg.dcd',
                    help='trajectory file for pdb')
     p.add_argument('--contactdir', default=f'{HBV_ENM_PATH}/scripts/contact_files',
                    help='Directory containing A_contacts.txt … D_contacts.txt')
@@ -82,24 +83,24 @@ def parse_frames(cutoff, pdb_file, traj_file, contact_dir):
     Loops through the trajectory file to look for native contacts
 
     Returns 2 dictionaries containing native contact bond data:
-    -  iface_contacts[frame_#][B1, C2] = (number of bonds in the B1-C2 interface in frame_#)
-    -  type_data[frame_#]{B1 - C2 : ([resid1, resid2], [resid3, resid4]...}
+    -  iface_type_bonds[frame_#][B1, C2] = (number of bonds in the B1-C2 interface in frame_#)
+    -  iface_res_data[frame_#]{B1 - C2 : ([resid1, resid2], [resid3, resid4]...}
     """
-    iface_contacts = defaultdict(lambda: defaultdict(int))
-    type_data = defaultdict(lambda: defaultdict(list))
+    iface_bonds = defaultdict(lambda: defaultdict(int))
+    iface_res_data = defaultdict(lambda: defaultdict(list))
 
     u = mda.Universe(pdb_file, traj_file)
     
     contacts = build_native_contacts(contact_dir)
     Nframes = len(u.trajectory)
-    print(Nframes)
+    print(f"Number of frames: {Nframes}")
 
     # Pre-compute all selections once
     pair_selections = []
     for iface, pairs in contacts.items():
         for (chain1, res1, chain2, res2) in pairs:
-            ag1 = u.select_atoms(f'resid {res1}')
-            ag2 = u.select_atoms(f'resid {res2}')
+            ag1 = u.select_atoms(f'resid {res1} and chainID {chain1}')
+            ag2 = u.select_atoms(f'resid {res2} and chainID {chain2}')
             pair_selections.append((iface, res1, res2, ag1, ag2))
 
     for ts in u.trajectory:
@@ -111,18 +112,114 @@ def parse_frames(cutoff, pdb_file, traj_file, contact_dir):
             for i, atom1 in enumerate(ag1):
                 for j, atom2 in enumerate(ag2):
                     if dists[i, j] < cutoff and atom1.segid != atom2.segid:
-                        iface_contacts[frame][(atom1.segid, atom2.segid)] += 1
+                        iface_bonds[frame][(atom1.segid, atom2.segid)] += 1
                         iface_name = f"{atom1.segid}-{atom2.segid}"
-                        type_data[frame][iface_name].append((res1, res2))
+                        iface_res_data[frame][iface_name].append((res1, res2))
 
-    return iface_contacts, type_data
+    return iface_bonds, iface_res_data
+
+
+# ---------------------------------------------------------------------------
+# Analysis Functions
+# ---------------------------------------------------------------------------
+
+def get_probability(iface_contacts, contacts_per_bond):
+    """
+    Returns the fraction of time each interface was bonded given
+    the number of contacts_per_bond threshold.
+
+    Fraction_bonded = (frames_bonded) / (total_frames)
+    """
+    total_frames = max(iface_contacts.keys()) + 1
+
+    # Count frames where each interface had >= contacts_per_bond contacts
+    frames_bonded = defaultdict(int)
+    for frame_data in iface_contacts.values():
+        for interface, count in frame_data.items():
+            if count >= contacts_per_bond:
+                frames_bonded[interface] += 1
+
+    probability = {iface: frames_bonded[iface] / total_frames
+                   for iface in frames_bonded}
+    return probability
+
+def plot_iface_contacts(iface_contacts):
+    """
+    Plot each unique interface as a line with smart formatting
+    """
+    all_frames = list(range(max(iface_contacts.keys()) + 1))
+
+    # Collect all unique interface names
+    all_ifaces = set()
+    for frame_data in iface_contacts.values():
+        all_ifaces.update(frame_data.keys())
+
+    step = 10
+    frames = all_frames[::step]
+    n_ifaces = len(all_ifaces)
+    
+    # For debugging
+    n_contacts = iface_contacts[0][("B1", "C1")]
+    print(f"Number of contacts:{n_contacts}")
+
+    print(f"Plotting {n_ifaces} interfaces across {len(frames)} frames")
+    
+    # IMPROVEMENT 1: Adaptive figure size based on data
+    # Wider if many interfaces, narrower if few
+    fig_width = max(16, 20 + (n_ifaces / 50))  # Scales with complexity
+    
+    fig, ax = plt.subplots(figsize=(fig_width, 7), dpi=100)  # Lower DPI, larger fig
+    
+    # IMPROVEMENT 2: Better coloring scheme
+    colors = plt.cm.tab20c(np.linspace(0, 1, min(n_ifaces, 20)))
+    if n_ifaces > 20:
+        colors = plt.cm.hsv(np.linspace(0, 0.9, n_ifaces))
+    
+    # IMPROVEMENT 3: Plot with better styling
+    for idx, iface in enumerate(all_ifaces):
+        bonds = pd.Series([iface_contacts[f].get(iface, 0) for f in frames])
+        smoothed = bonds.rolling(window=50, center=True, min_periods=1).mean()
+        color = colors[idx % len(colors)]
+        ax.plot(frames, bonds, linewidth=0.5, alpha=0.2, color=color)
+        ax.plot(frames, smoothed,
+                label=iface,
+                linewidth=1.5,
+                alpha=0.8,
+                color=color)
+    
+    # IMPROVEMENT 4: Better axis labels and title
+    ax.set_xlabel("Frame", fontsize=12, fontweight='bold')
+    ax.set_ylabel("Number of Contacts", fontsize=12, fontweight='bold')
+    ax.set_title(f"Native Contacts per Interface ({n_ifaces} unique)", 
+                 fontsize=14, fontweight='bold', pad=20)
+    ax.grid(True, alpha=0.3, linestyle='--')  # Subtle grid for readability
+    
+    # IMPROVEMENT 5: Smart legend handling
+    if n_ifaces <= 20:
+        # Small number of interfaces: show legend
+        ax.legend(loc='upper left', fontsize=8)
+    else:
+        # Too many interfaces: sample legend or omit
+        # Option A: Show every Nth interface
+        sample_indices = np.linspace(0, n_ifaces - 1, min(15, n_ifaces), dtype=int)
+        handles, labels = ax.get_legend_handles_labels()
+        ax.legend([handles[i] for i in sample_indices],
+                  [labels[i] for i in sample_indices],
+                  bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8)
+    
+    plt.tight_layout()
+    plt.savefig("iface_contacts.png", dpi=150, bbox_inches='tight')
+    print(f"Saved to iface_contacts.png")
+    plt.show()
+    return
+
 
 if __name__ == "__main__":
-    pdb_file = "/home/kyle/2026_Research/HBV_enm/important_oligomer_pdbs/cg_ABCD_separate.pdb"
-    traj_file = "/home/kyle/2026_Research/trajectory_files/ABCD_seg.dcd"
-    contact_dir = "/home/kyle/2026_Research/HBV_enm/contact_files"
     
     args = parse_args()
-    iface_contacts, type_data = parse_frames(args.cutoff, args.pdb, args.traj, args.contactdir)
-    print(iface_contacts)
-    print(type_data)
+    iface_bonds, iface_res_data = parse_frames(args.cutoff, args.pdb, args.traj, args.contactdir)
+
+    # print(iface_contacts)
+    # print(type_data)
+    plot_iface_contacts(iface_bonds)
+    # print(iface_bonds)

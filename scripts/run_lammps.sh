@@ -41,20 +41,19 @@ pdb_default="${HBV_ENM_PATH}/scripts/important_oligomer_pdbs/abcd_capsid.pdb" #"
 PDB=${2:-${pdb_default}}
 
 # Enative (default value = 1.0)
-Enative=${3:-1}
+Enative=${3:-1.5}
 
 # Simulation length in timesteps (10 fs each timestep)
 nsteps=${4:-100000000}
 
 # Output directory
-output_dir_top_level=${5:"${SCRATCH}/HBV_enm/"}
-output_dir="${output_dir_top_level}${SLURM_JOB_ID}"
+output_dir=${5:"${SCRATCH}/HBV_enm/Enative=${Enative}_seed=${seed}"}
 
 # ---------------------------------------------------------------------------
 # Logs simulation data
 # ---------------------------------------------------------------------------
 
-echo $(date) JOBID:${SLURM_JOB_ID}     Output Directory:$output_dir     PDB File:$PDB     Enative:$Enative     Seed Num:$seed >> master.log
+echo $(date) JOBID:${SLURM_JOB_ID}     Enative:$Enative     PDB File:$PDB     Seed Num:$seed     Output Directory:$output_dir >> master.log
 
 
 # ---------------------------------------------------------------------------

@@ -26,10 +26,9 @@ Enative_vals=(0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 1.1 1.2 1.3 1.4 1.5)
 # Simulation length in timesteps (10 fs each, so 1000000 = 10 ns)
 nsteps=1000000
 
-
 # Output directory
 output_tag="Enative"
-output_dir_top_level="${SCRATCH}/HBV_enm/${output_tag}/${SLURM_JOB_ID}"
+
 
 # ---------------------------------------------------------------------------
 # Main loop: for each Enative, run nseed independent simulations
@@ -39,6 +38,7 @@ for seed in "${seed_vals[@]}"
 do
     for Enative in "${Enative_vals[@]}"
     do
-        sbatch run_lammps.sh ${seed} ${PDB} ${Enative} ${nsteps} ${output_top_level}
+        output_dir="${SCRATCH}/HBV_enm/${output_tag}/Enative=${Enative}_seed=${seed}"
+        sbatch run_lammps.sh ${seed} ${PDB} ${Enative} ${nsteps} ${output_dir}
     done
 done

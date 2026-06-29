@@ -216,7 +216,7 @@ def build_lattice(
 
     # --- write output ---
     os.makedirs(output_dir, exist_ok=True)
-    filename = f'{output_dir}/lattice=fcc_Ndimers={n_sites}.pdb'
+    filename = f'{output_dir}/lattice=fcc_Ndimers={n_sites}_blength={box_x}.pdb'
     with mda.Writer(filename, total_atoms) as w:
         w.write(merged.atoms)
 

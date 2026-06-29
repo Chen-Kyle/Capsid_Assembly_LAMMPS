@@ -33,11 +33,11 @@ HBV_ENM_PATH = os.environ.get("HBV_ENM_PATH", "/home/kyle/2026_Research/HBV_enm"
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument('--pdb',        default=f'{HBV_ENM_PATH}/scripts/important_oligomer_pdbs/cg_ABCD_separate.pdb',
+    p.add_argument('--pdb',        default=f'{HBV_ENM_PATH}/scripts/important_oligomer_pdbs/cg_ABCD_avg.pdb',
                    help='Simulation-start PDB (separated decamer)')
-    p.add_argument('--traj',       default=f'{HBV_ENM_PATH}/trajectory_files/ABCD_seg.dcd',
+    p.add_argument('--traj',       default=f'{HBV_ENM_PATH}/trajectory_files/ABCD_avg_Enative/Enative_traj_files/Enative=1.5_seed=42/seg.dcd',
                    help='trajectory file for pdb')
-    p.add_argument('--contactdir', default=f'{HBV_ENM_PATH}/scripts/contact_files',
+    p.add_argument('--contactdir', default=f'{HBV_ENM_PATH}/scripts/computed_contact_files',
                    help='Directory containing A_contacts.txt … D_contacts.txt')
     p.add_argument('--cutoff',    type=float, default=8.0,
                    help='Sets cutoff distance for identifying bonds')
@@ -66,7 +66,7 @@ def build_native_contacts(contact_dir):
     regardless of which specific monomer it belongs to. This allows 
     self-assembly with arbitrary numbers of dimers.
     """
-    cols = ['resname1', 'resnum1', 'resname2', 'resnum2', 'dist', 'score']
+    cols = ['resname1', 'resnum1', 'resname2', 'resnum2', 'dist', 'score', 'computed_dist']
     contacts = {iface: [] for iface in 'ABCD'}
     for iface in 'ABCD':
         partner = CONTACT_PARTNER_CHAIN[iface]
@@ -78,16 +78,18 @@ def build_native_contacts(contact_dir):
             )
     return contacts
 
+
+
 def parse_frames(cutoff, pdb_file, traj_file, contact_dir):
     """
     Loops through the trajectory file to look for native contacts
 
     Returns 2 dictionaries containing native contact bond data:
     -  iface_type_bonds[frame_#][B1, C2] = (number of bonds in the B1-C2 interface in frame_#)
-    -  iface_res_data[frame_#]{B1 - C2 : ([resid1, resid2], [resid3, resid4]...}
+    -  iface_res_data[frame_#]{B1 - C2 : ({resid1, resid2: dist_resid1_resid2}, {resid3, resid4 :...}...}
     """
     iface_bonds = defaultdict(lambda: defaultdict(int))
-    iface_res_data = defaultdict(lambda: defaultdict(list))
+    iface_res_data = defaultdict(lambda: defaultdict(dict))
 
     u = mda.Universe(pdb_file, traj_file)
     
@@ -114,7 +116,68 @@ def parse_frames(cutoff, pdb_file, traj_file, contact_dir):
                     if dists[i, j] < cutoff and atom1.segid != atom2.segid:
                         iface_bonds[frame][(atom1.segid, atom2.segid)] += 1
                         iface_name = f"{atom1.segid}-{atom2.segid}"
-                        iface_res_data[frame][iface_name].append((res1, res2))
+                        iface_res_data[frame][iface_name][(res1, res2)] = dists[i, j]
+
+    return iface_bonds, iface_res_data
+
+
+def parse_frames_computed_cutoffs(pdb_file, traj_file, contact_dir):
+    """
+    Like parse_frames but uses per-residue-pair cutoff distances loaded from
+    A_contacts_with_computed.txt ... D_contacts_with_computed.txt.
+
+    The computed cutoff files are expected to have the same columns as the
+    original contact files plus a final column with the per-pair cutoff distance:
+        resname1 resnum1 resname2 resnum2 dist score computed_cutoff
+
+    Returns the same two dictionaries as parse_frames:
+    -  iface_bonds[frame][(segid1, segid2)]  = contact count
+    -  iface_res_data[frame][iface_name][(res1, res2)] = distance
+    """
+    iface_bonds = defaultdict(lambda: defaultdict(int))
+    iface_res_data = defaultdict(lambda: defaultdict(dict))
+
+    stdev_bond = 2 #Gaussian stdev in the histogram is about 2-3 angstroms
+    
+    # Build per-pair cutoff lookup and pair list from the computed cutoff files
+    cols = ['resname1', 'resnum1', 'resname2', 'resnum2', 'dist', 'score', 'computed_cutoff']
+    computed_cutoffs = {}   # (iface, res1, res2) -> cutoff distance
+    contacts = {iface: [] for iface in 'ABCD'}
+
+    for iface in 'ABCD':
+        partner = CONTACT_PARTNER_CHAIN[iface]
+        clist = pd.read_csv(f"{contact_dir}/{iface}_contacts_with_computed.txt",
+                            sep=r'\s+', header=None, names=cols)
+        for _, row in clist.iterrows():
+            res1, res2 = int(row['resnum1']), int(row['resnum2'])
+            computed_cutoffs[(iface, res1, res2)] = float(row['computed_cutoff'])
+            contacts[iface].append((iface, res1, partner, res2))
+
+    u = mda.Universe(pdb_file, traj_file)
+    Nframes = len(u.trajectory)
+    print(f"Number of frames: {Nframes}")
+
+    # Pre-compute all selections and attach the per-pair cutoff
+    pair_selections = []
+    for iface, pairs in contacts.items():
+        for (chain1, res1, chain2, res2) in pairs:
+            ag1 = u.select_atoms(f'resid {res1} and chainID {chain1}')
+            ag2 = u.select_atoms(f'resid {res2} and chainID {chain2}')
+            cutoff = computed_cutoffs[(iface, res1, res2)] + stdev_bond
+            pair_selections.append((iface, res1, res2, ag1, ag2, cutoff))
+
+    for ts in u.trajectory:
+        frame = ts.frame
+        for (iface, res1, res2, ag1, ag2, cutoff) in pair_selections:
+            dists = mda.lib.distances.distance_array(
+                ag1.positions, ag2.positions, box=u.dimensions
+            )
+            for i, atom1 in enumerate(ag1):
+                for j, atom2 in enumerate(ag2):
+                    if dists[i, j] < cutoff and atom1.segid != atom2.segid:
+                        iface_bonds[frame][(atom1.segid, atom2.segid)] += 1
+                        iface_name = f"{atom1.segid}-{atom2.segid}"
+                        iface_res_data[frame][iface_name][(res1, res2)] = dists[i, j]
 
     return iface_bonds, iface_res_data
 
@@ -143,7 +206,12 @@ def get_probability(iface_contacts, contacts_per_bond):
                    for iface in frames_bonded}
     return probability
 
-def plot_iface_contacts(iface_contacts):
+
+# ---------------------------------------------------------------------------
+# Plotting Functions
+# ---------------------------------------------------------------------------
+
+def plot_iface_contacts(iface_contacts, output_dir):
     """
     Plot each unique interface as a line with smart formatting
     """
@@ -208,18 +276,69 @@ def plot_iface_contacts(iface_contacts):
                   bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8)
     
     plt.tight_layout()
-    plt.savefig("iface_contacts.png", dpi=150, bbox_inches='tight')
-    print(f"Saved to iface_contacts.png")
+    plt.savefig(f"{output_dir}/iface_contacts.png", dpi=150, bbox_inches='tight')
+    print(f"Saved to {output_dir}/iface_contacts.png")
     plt.show()
     return
+
+
+def plot_dists(iface_res_data, interface_name, output_dir):
+    """
+    4x5 panel plot of distance distributions for each native contact
+    in the given interface across all frames.
+
+    iface_res_data : returned from parse_frames
+    interface_name : e.g. "B1-C1"
+    """
+    print(f'Plotting native contact distances for: {interface_name}')
+    contact_dists = defaultdict(list)
+    for frame_data in iface_res_data.values():
+        if interface_name in frame_data:
+            for (res1, res2), dist in frame_data[interface_name].items():
+                contact_dists[(res1, res2)].append(dist)
+
+    if not contact_dists:
+        print(f"No data found for interface '{interface_name}'")
+        return
+
+    contacts = sorted(contact_dists.keys())
+    if len(contacts) > 20:
+        print(f"Warning: {len(contacts)} contacts found, only plotting first 20")
+
+    fig, axes = plt.subplots(4, 5, figsize=(20, 16))
+    axes = axes.flatten()
+
+    for idx, (res1, res2) in enumerate(contacts[:20]):
+        ax = axes[idx]
+        dists = contact_dists[(res1, res2)]
+        median = np.median(dists)
+        ax.hist(dists, bins=30, color='steelblue', edgecolor='white', linewidth=0.5)
+        ax.axvline(median, color='red', linewidth=1.2, linestyle='--', label=f'median={median:.1f}Å')
+        ax.legend(fontsize=6, loc='upper right')
+        ax.set_title(f"Res {res1} - Res {res2}", fontsize=9, fontweight='bold', pad=4)
+        ax.set_xlabel("Distance (Å)", fontsize=8)
+        ax.set_ylabel("Count", fontsize=8)
+        ax.tick_params(labelsize=7)
+
+    for idx in range(len(contacts), 20):
+        axes[idx].set_visible(False)
+
+    fig.suptitle(f"Native Contact Distance Distributions: {interface_name}",
+                 fontsize=14, fontweight='bold')
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
+    plt.subplots_adjust(hspace=0.55)
+    plt.savefig(f"{output_dir}/dists_{interface_name.replace('-', '_')}.png", dpi=150, bbox_inches='tight')
+    print(f"Saved to {output_dir}/dists_{interface_name.replace('-', '_')}.png")
+    plt.show()
 
 
 if __name__ == "__main__":
     
     args = parse_args()
-    iface_bonds, iface_res_data = parse_frames(args.cutoff, args.pdb, args.traj, args.contactdir)
-
+    # iface_bonds, iface_res_data = parse_frames(args.cutoff, args.pdb, args.traj, args.contactdir)
+    iface_bonds, iface_res_data = parse_frames_computed_cutoffs(args.pdb, args.traj, args.contactdir)
     # print(iface_contacts)
     # print(type_data)
-    plot_iface_contacts(iface_bonds)
+    plot_iface_contacts(iface_bonds, args.output_dir)
+    # plot_dists(iface_res_data, "B1-C1", args.output_dir)
     # print(iface_bonds)

@@ -13,7 +13,7 @@ Usage
     python build_fcc_lattice.py \\
         --ab subunit_AB.pdb \\
         --cd subunit_CD.pdb \\
-        --lattice-param 200.0 \\
+        --lattice_param 200.0 \\
         --nx 2 --ny 2 --nz 2 \\
         --output lattice.pdb
 
@@ -21,7 +21,7 @@ Arguments
 ---------
     --ab             PDB file for the AB-type subunit (chains A+B)
     --cd             PDB file for the CD-type subunit (chains C+D)
-    --lattice-param  FCC lattice parameter in Angstroms (edge length of cubic unit cell)
+    --lattice_param  FCC lattice parameter in Angstroms (edge length of cubic unit cell)
     --nx, --ny, --nz Number of unit cells along each axis (default: 1 each)
     --output         Output PDB filename (default: fcc_lattice.pdb)
     --center         If set, center the entire lattice at the origin before writing
@@ -50,7 +50,7 @@ def parse_args():
                     help="PDB file for AB subunit")
     p.add_argument("--cd",            default=f'{HBV_ENM_PATH}/scripts/important_oligomer_pdbs/cg_C1D1_avg.pdb',
                    help="PDB file for CD subunit")
-    p.add_argument("--lattice-param", default=100,  type=float,
+    p.add_argument("--lattice_param", default=100,  type=float,
                    metavar="A",       help="FCC lattice parameter in Angstroms (> length of subunit = 85Å)")
     p.add_argument("--nl",            default=5,      type=int,
                    help="Unit cells along length (1:4  2:32  3:108  4:256  5:500...)")

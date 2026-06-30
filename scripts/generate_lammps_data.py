@@ -68,6 +68,8 @@ def parse_args():
                    help='Native contact energy scale (multiplies all Gaussian Eatt)')
     p.add_argument('--output_dir',     default=f'{HBV_ENM_PATH}/scripts/lammps_out',
                    help='Output LAMMPS data file name')
+    p.add_argument('--buildconn',     action='store_true', default=False,
+                   help='If set, creates a new pdb file with bond information')
     return p.parse_args()
 
 # ---------------------------------------------------------------------------
@@ -408,9 +410,10 @@ def main():
     harmonic_bonds = build_harmonic_bonds(u_sim, dimer_list, args.conndir)
     print(f'  {len(harmonic_bonds)} bonds')
 
-    print('Writing PDB with bond connectivity...')
-    conn_data = np.array([[i0 + 1, j0 + 1] for (i0, j0, _) in harmonic_bonds])
-    write_connectivity_to_pdb(conn_data, args.pdb, 'from_connectivity_files')
+    if args.buildconn:
+        print('Writing PDB with bond connectivity...')
+        conn_data = np.array([[i0 + 1, j0 + 1] for (i0, j0, _) in harmonic_bonds])
+        write_connectivity_to_pdb(conn_data, args.pdb, 'from_connectivity_files')
 
     print('Building native contacts...')
     native_contacts = build_native_contacts(args.contactdir)

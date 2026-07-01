@@ -37,10 +37,12 @@ def parse_args():
                    help='Simulation-start PDB (separated decamer)')
     p.add_argument('--traj',       default=f'{HBV_ENM_PATH}/trajectory_files/ABCD_avg_Enative/Enative_traj_files/Enative=1.5_seed=42/seg.dcd',
                    help='trajectory file for pdb')
-    p.add_argument('--contactdir', default=f'{HBV_ENM_PATH}/scripts/computed_contact_files',
+    p.add_argument('--contactdir', default=f'{HBV_ENM_PATH}/scripts/claude_computed_contact_files',
                    help='Directory containing A_contacts.txt … D_contacts.txt')
     p.add_argument('--cutoff',    type=float, default=8.0,
                    help='Sets cutoff distance for identifying bonds')
+    p.add_argument('--contacts',    type=int, default=10,
+                   help='The number of contacts to be considered bonded')
     p.add_argument('--output_dir',     default=f'{HBV_ENM_PATH}/raw_data',
                    help='Output directory for bond analysis data')
     return p.parse_args()
@@ -88,6 +90,7 @@ def parse_frames(cutoff, pdb_file, traj_file, contact_dir):
     -  iface_type_bonds[frame_#][B1, C2] = (number of bonds in the B1-C2 interface in frame_#)
     -  iface_res_data[frame_#]{B1 - C2 : ({resid1, resid2: dist_resid1_resid2}, {resid3, resid4 :...}...}
     """
+    print("\nParsing contacts in frames...\n")
     iface_bonds = defaultdict(lambda: defaultdict(int))
     iface_res_data = defaultdict(lambda: defaultdict(dict))
 
@@ -134,11 +137,12 @@ def parse_frames_computed_cutoffs(pdb_file, traj_file, contact_dir):
     -  iface_bonds[frame][(segid1, segid2)]  = contact count
     -  iface_res_data[frame][iface_name][(res1, res2)] = distance
     """
+    print("\nParsing pre-computed contacts in frames...\n")
     iface_bonds = defaultdict(lambda: defaultdict(int))
     iface_res_data = defaultdict(lambda: defaultdict(dict))
 
     stdev_bond = 2 #Gaussian stdev in the histogram is about 2-3 angstroms
-    
+
     # Build per-pair cutoff lookup and pair list from the computed cutoff files
     cols = ['resname1', 'resnum1', 'resname2', 'resnum2', 'dist', 'score', 'computed_cutoff']
     computed_cutoffs = {}   # (iface, res1, res2) -> cutoff distance
@@ -185,6 +189,63 @@ def parse_frames_computed_cutoffs(pdb_file, traj_file, contact_dir):
 # ---------------------------------------------------------------------------
 # Analysis Functions
 # ---------------------------------------------------------------------------
+
+def build_clusters(iface_bonds, contacts_per_bond):
+    """
+    For each frame, finds connected components of monomers linked by
+    enough contacts, and records which interfaces are active in each cluster.
+
+    Returns:
+        clusters[frame] = list of dicts, each with:
+            'segments'   : frozenset of segids in the cluster
+            'interfaces' : dict mapping (segid1, segid2) -> contact count
+                           for every active edge within the cluster
+    """
+    print("\nBuilding Clusters...\n")
+    clusters = {}
+
+    for frame, frame_data in iface_bonds.items():
+        # Collect active edges (meet the threshold)
+        active_edges = {pair: count for pair, count in frame_data.items()
+                        if count >= contacts_per_bond}
+
+        # Build adjacency from active edges
+        # A dictionary containing each segid as a key and a set of its "bonded" neighbors for the values
+        neighbors = defaultdict(set)
+        for (s1, s2) in active_edges:
+            neighbors[s1].add(s2)
+            neighbors[s2].add(s1)
+
+        # BFS to find connected components
+        visited = set()
+        frame_clusters = []
+        for start in neighbors:
+            if start in visited:
+                continue
+            component = set()
+            queue = [start]
+            while queue:
+                curr = queue.pop()
+                if curr in visited:
+                    continue
+                visited.add(curr)
+                component.add(curr)
+                # Set subtraction - removes all visited interfaces from the queue
+                queue.extend(neighbors[curr] - visited)
+
+            # Collect all active edges whose both endpoints are in this component
+            ifaces = {pair: count for pair, count in active_edges.items()
+                      if pair[0] in component and pair[1] in component}
+
+            frame_clusters.append({
+                'segments':   frozenset(component),
+                'interfaces': ifaces,
+            })
+
+        clusters[frame] = frame_clusters
+
+    return clusters
+
 
 def get_probability(iface_contacts, contacts_per_bond):
     """
@@ -339,6 +400,8 @@ if __name__ == "__main__":
     iface_bonds, iface_res_data = parse_frames_computed_cutoffs(args.pdb, args.traj, args.contactdir)
     # print(iface_contacts)
     # print(type_data)
-    plot_iface_contacts(iface_bonds, args.output_dir)
+    #plot_iface_contacts(iface_bonds, args.output_dir)
+    clusters = build_clusters(iface_bonds, args.contacts)
+    #print(clusters)
     # plot_dists(iface_res_data, "B1-C1", args.output_dir)
     # print(iface_bonds)

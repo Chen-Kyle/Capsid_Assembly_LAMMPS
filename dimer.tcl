@@ -125,9 +125,10 @@ proc load_pdb {myfile {is_angled 1} {thescale 0.1}} {
 }
 
 ############################################################
-# Calculates the RMSD between two specified frames
+# RMSD functions
 ############################################################
 
+# Calculates the RMSD between two specified frames
 proc frame_rmsd {selection frame1 frame2} {
   set mol [$selection molindex]
   # check the range
@@ -150,10 +151,7 @@ proc frame_rmsd {selection frame1 frame2} {
   return [expr sqrt($rmsd / ([$selection num] + 0.0))]
 }
 
-############################################################
 # Aligns all frames to frame 0 to remove COM drift
-############################################################
-
 proc align_frames {mol_id} {
   set ref [atomselect $mol_id all frame 0]
   set sel [atomselect $mol_id all]
@@ -163,10 +161,7 @@ proc align_frames {mol_id} {
   }
 }
 
-############################################################
 # Calculates the RMSD of the top loaded molecule
-############################################################
-
 proc get_rmsd {mol_id} {
   puts "Getting RMSD of mol_id: $mol_id"
   align_frames $mol_id
@@ -179,4 +174,67 @@ proc get_rmsd {mol_id} {
     puts $outfile1 [list $i [frame_rmsd $sel $i 0]]
   }
   close $outfile1
+}
+
+############################################################
+# Creates a folder of img files to make a movie out of with ffmpeg
+############################################################
+proc make_movie {path interv maxframe} {
+
+  animate goto start
+  set i [molinfo top get frame]
+  set stop $maxframe ;#[molinfo top get numframes]
+
+  while {$i < [expr $stop + 1]} {
+
+    file mkdir $path ;# [file mkdir] in Tcl is like mkdir -p
+    file mkdir "$path/images"
+    #render Tachyon [format "$path/images/image_%05d" $i] "/usr/local/lib/vmd/tachyon_LINUXAMD64" -aasamples 12 %s -format TARGA -res 2000 2000 -o %s.tga
+    render TachyonLOptiXInternal [format "$path/images/image_%05d.tga" $i] -res 2000 2000 %s
+    #render Tachyon [format "$path/images/image_%05d" $i] "/Applications/VMD 1.9.4a57-arm64-Rev12.app/Contents/vmd/tachyon_MACOSXARM64" -aasamples 12 %s -format TARGA -res 2000 2000 -o %s.tga
+          render TachyonLOptiXInternal [format "$path/$mol_id/images/image_%05d.tga" $i] -res 2000 2000 %s
+    set i [expr $i + $interv]
+    animate goto $i
+  }
+
+}
+
+proc do_ffmpeg {folder framerate} {
+  set cmd "ffmpeg -r $framerate -pattern_type glob -y -i \"${folder}/*.tga\" -vf \"pad=ceil(iw/2)*2:ceil(ih/2)*2\" -vcodec libx264 -pix_fmt yuv420p \"${folder}/movie.mp4\""
+
+  if {[catch {eval exec -ignorestderr $cmd 2>@1} out]} {
+    echo error "'ffmpeg' execution command failed."
+    echo debug "reason= $out"
+  }
+}
+
+############################################################
+# Renders frames and encodes a video in one step.
+# Output: <path>/<foldername>_video.mp4
+# Usage: make_and_render_video <path> <interv> <maxframe> [framerate=1]
+############################################################
+proc make_and_render_video {path interv maxframe {framerate 30}} {
+  set imgdir "$path/images"
+  file mkdir $imgdir
+
+  animate goto start
+  set i [molinfo top get frame]
+
+  while {$i < [expr $maxframe + 1]} {
+    render TachyonLOptiXInternal [format "$imgdir/image_%05d.tga" $i] -res 2000 2000 %s
+    set i [expr $i + $interv]
+    animate goto $i
+  }
+
+  set foldername [file tail $path]
+  set outfile "$path/${foldername}_video.mp4"
+
+  set cmd "ffmpeg -r $framerate -pattern_type glob -y -i \"${imgdir}/*.tga\" -vf \"pad=ceil(iw/2)*2:ceil(ih/2)*2\" -vcodec libx264 -pix_fmt yuv420p \"$outfile\""
+
+  if {[catch {eval exec -ignorestderr $cmd 2>@1} out]} {
+    echo error "'ffmpeg' execution command failed."
+    echo debug "reason= $out"
+  } else {
+    puts "Video saved to: $outfile"
+  }
 }

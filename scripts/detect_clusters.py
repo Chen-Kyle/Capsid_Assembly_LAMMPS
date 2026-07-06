@@ -29,6 +29,7 @@ import pandas as pd
 import MDAnalysis as mda
 import matplotlib.pyplot as plt
 from collections import defaultdict
+from MDAnalysis.lib.distances import capped_distance
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -115,18 +116,40 @@ def parse_frames(cutoff, pdb_file, traj_file, contact_dir):
             ag2 = u.select_atoms(f'resid {res2} and chainID {chain2}')
             pair_selections.append((iface, res1, res2, ag1, ag2))
 
+    skin          = 35.0  # Angstroms beyond cutoff used to build the neighbor list
+    rebuild_every = 10    # rebuild neighbor list every N frames
+    nl = {}             # idx -> array of [i, j] atom-index pairs within cutoff + skin
+
     for ts in u.trajectory:
         frame = ts.frame
-        for (iface, res1, res2, ag1, ag2) in pair_selections:
-            dists = mda.lib.distances.distance_array(
-                ag1.positions, ag2.positions, box=u.dimensions
-            )
-            for i, atom1 in enumerate(ag1):
-                for j, atom2 in enumerate(ag2):
-                    if dists[i, j] < cutoff and atom1.segid != atom2.segid:
-                        iface_bonds[frame][(atom1.segid, atom2.segid)] += 1
-                        iface_name = f"{atom1.segid}-{atom2.segid}"
-                        iface_res_data[frame][iface_name][(res1, res2)] = dists[i, j]
+
+        # Rebuild neighbor list every rebuild_every frames
+        if frame % rebuild_every == 0:
+            nl = {}
+            for idx, (iface, res1, res2, ag1, ag2) in enumerate(pair_selections):
+                pairs = capped_distance(
+                    ag1.positions, ag2.positions,
+                    max_cutoff=cutoff + skin, box=u.dimensions, return_distances=False
+                )
+                if len(pairs) > 0:
+                    nl[idx] = pairs
+
+        # Only check atom pairs stored in the neighbor list
+        box = u.dimensions[:3]
+        for idx, (iface, res1, res2, ag1, ag2) in enumerate(pair_selections):
+            if idx not in nl:
+                continue
+            for (i, j) in nl[idx]:
+                atom1, atom2 = ag1[i], ag2[j]
+                if atom1.segid == atom2.segid:
+                    continue
+                diff = ag1.positions[i] - ag2.positions[j]
+                diff -= box * np.round(diff / box)   # minimum image convention
+                dist = np.sqrt(np.dot(diff, diff))
+                if dist < cutoff:
+                    iface_bonds[frame][(atom1.segid, atom2.segid)] += 1
+                    iface_name = f"{atom1.segid}-{atom2.segid}"
+                    iface_res_data[frame][iface_name][(res1, res2)] = dist
 
     return iface_bonds, iface_res_data
 
@@ -177,18 +200,40 @@ def parse_frames_computed_cutoffs(pdb_file, traj_file, contact_dir):
             cutoff = computed_cutoffs[(iface, res1, res2)] + stdev_bond
             pair_selections.append((iface, res1, res2, ag1, ag2, cutoff))
 
+    skin          = 35.0  # Angstroms beyond cutoff used to build the neighbor list
+    rebuild_every = 10   # rebuild neighbor list every N frames
+    nl = {}              # idx -> array of [i, j] atom-index pairs within cutoff + skin
+
     for ts in u.trajectory:
         frame = ts.frame
-        for (iface, res1, res2, ag1, ag2, cutoff) in pair_selections:
-            dists = mda.lib.distances.distance_array(
-                ag1.positions, ag2.positions, box=u.dimensions
-            )
-            for i, atom1 in enumerate(ag1):
-                for j, atom2 in enumerate(ag2):
-                    if dists[i, j] < cutoff and atom1.segid != atom2.segid:
-                        iface_bonds[frame][(atom1.segid, atom2.segid)] += 1
-                        iface_name = f"{atom1.segid}-{atom2.segid}"
-                        iface_res_data[frame][iface_name][(res1, res2)] = dists[i, j]
+
+        # Rebuild neighbor list every rebuild_every frames
+        if frame % rebuild_every == 0:
+            nl = {}
+            for idx, (iface, res1, res2, ag1, ag2, cutoff) in enumerate(pair_selections):
+                pairs = capped_distance(
+                    ag1.positions, ag2.positions,
+                    max_cutoff=cutoff + skin, box=u.dimensions, return_distances=False
+                )
+                if len(pairs) > 0:
+                    nl[idx] = pairs
+
+        # Only check atom pairs stored in the neighbor list
+        box = u.dimensions[:3]
+        for idx, (iface, res1, res2, ag1, ag2, cutoff) in enumerate(pair_selections):
+            if idx not in nl:
+                continue
+            for (i, j) in nl[idx]:
+                atom1, atom2 = ag1[i], ag2[j]
+                if atom1.segid == atom2.segid:
+                    continue
+                diff = ag1.positions[i] - ag2.positions[j]
+                diff -= box * np.round(diff / box)   # minimum image convention
+                dist = np.sqrt(np.dot(diff, diff))
+                if dist < cutoff:
+                    iface_bonds[frame][(atom1.segid, atom2.segid)] += 1
+                    iface_name = f"{atom1.segid}-{atom2.segid}"
+                    iface_res_data[frame][iface_name][(res1, res2)] = dist
 
     return iface_bonds, iface_res_data
 
@@ -277,9 +322,9 @@ def save_cluster_data(pdb_file, traj_file, contact_dir, contacts_per_bond, outpu
     clusters = build_clusters(iface_bonds, contacts_per_bond)
     
     print("\nSaving cluster data...\n")
-    output_path = traj_file.replace("/trajectory_file/", "/raw_data/cluster_data/")
-    output_path = output_path.replace(".dcd", ".pkl")
+    output_path = traj_file.split("/trajectory_files/")[-1]
     output_path = f"{output_dir}/{output_path}"
+    output_path = output_path.replace(".dcd", ".pkl")
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "wb") as f:
         pickle.dump({

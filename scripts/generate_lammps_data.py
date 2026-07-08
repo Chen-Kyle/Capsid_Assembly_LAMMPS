@@ -243,7 +243,7 @@ def write_gaussian_table(filename, Eatt_kcal, n_points=20000):
 # LAMMPS data file writer
 # ---------------------------------------------------------------------------
 
-def write_lammps_data(outfile, positions_ang, harmonic_bonds, type_map, atom_to_molid):
+def write_lammps_data(outfile, positions_ang, harmonic_bonds, type_map, atom_to_molid, box=None):
     """
     Writes decamer.lammps the LAMMPS data file.
 
@@ -280,8 +280,12 @@ def write_lammps_data(outfile, positions_ang, harmonic_bonds, type_map, atom_to_
     n_bond_types = len(r0_to_type)
     n_bonds      = len(harm_typed)
 
-    lo = positions_ang.min(axis=0) - 50.0
-    hi = positions_ang.max(axis=0) + 50.0
+    if box is not None:
+        lo = np.array([0.0, 0.0, 0.0])
+        hi = np.array(box, dtype=float)
+    else:
+        lo = positions_ang.min(axis=0) - 50.0
+        hi = positions_ang.max(axis=0) + 50.0
 
     with open(outfile, 'w') as f:
         f.write('LAMMPS data file: HBV capsid CG Go model\n\n')
@@ -396,6 +400,11 @@ def main():
     print(f'Reading simulation PDB: {args.pdb}')
     u_sim     = mda.Universe(args.pdb)
     ca        = u_sim.select_atoms('name CA')
+    box = u_sim.dimensions[:3] if u_sim.dimensions is not None else None
+    if box is not None:
+        print(f'  CRYST1 box: {box[0]:.3f} x {box[1]:.3f} x {box[2]:.3f} Å')
+    else:
+        print('  No CRYST1 record found, box will be inferred from atom positions')
     positions = ca.positions.copy()
     print(f'  {len(positions)} CA atoms')
 
@@ -438,7 +447,7 @@ def main():
 
     print(f'Writing LAMMPS data file: {args.output_dir}/decamer.lammps')
     r0_to_type = write_lammps_data(
-        f'{args.output_dir}/decamer.lammps', positions, harmonic_bonds, type_map, atom_to_molid)
+        f'{args.output_dir}/decamer.lammps', positions, harmonic_bonds, type_map, atom_to_molid, box)
     print(f'  {len(r0_to_type)} harmonic bond types')
     print(f'  {len(type_map)} atom types (one per chain-letter + resnum combination)')
 

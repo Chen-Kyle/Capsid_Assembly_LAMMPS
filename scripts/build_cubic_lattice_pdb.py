@@ -46,10 +46,12 @@ def parse_args():
                     help="PDB file for AB subunit")
     p.add_argument("--cd",            default=f'{HBV_ENM_PATH}/scripts/important_oligomer_pdbs/cg_C1D1_avg.pdb',
                    help="PDB file for CD subunit")
-    p.add_argument("--box_length", default=500,  type=float,
+    p.add_argument("--box_length", default=1000,  type=float,
                    help="Box length in Angstroms (> length of subunit = 85Å)")
     p.add_argument("--N",            default=60,      type=int,
                    help="Number of subunits (should be a multiple of 2 for an equal number of dimers per dimer type)")
+    p.add_argument("--ratio",            default=50,      type=int,
+                   help="Ratio of AB to CD dimers (100 for all AB or 0 for all CD)")
     p.add_argument("--output_dir",        default=f"{HBV_ENM_PATH}/scripts/lattice_pdbs",
                    help="Output PDB directory")
     p.add_argument("--center",        action="store_true",
@@ -132,6 +134,7 @@ def build_lattice(
     cd_pdb: str,
     box_length: float,
     n_dimers: int,
+    ABCD_ratio: int,
     output_dir: str,
     center: bool = False,
 ) -> None:
@@ -170,9 +173,10 @@ def build_lattice(
     all_atom_groups = []
     ab_count = 0
     cd_count = 0
-    n_per_type = int(n_dimers/2)
+    n_AB = int(n_dimers*(ABCD_ratio/100))
+    n_CD = n_dimers-n_AB
 
-    dimer_order = ['AB'] * n_per_type + ['CD'] * n_per_type
+    dimer_order = ['AB'] * n_AB + ['CD'] * n_CD
     random.seed(42)
     random.shuffle(dimer_order)
 
@@ -228,6 +232,7 @@ if __name__ == "__main__":
         cd_pdb       = args.cd,
         box_length   = args.box_length,
         n_dimers     = args.N,
+        ABCD_ratio   = args.ratio,
         output_dir   = args.output_dir,
         center       = args.center,
     )

@@ -1,12 +1,7 @@
 """
-build_fcc_lattice.py
+build_cubic_lattice.py
 ====================
-Build an FCC crystal lattice from two PDB subunits.
-
-Subunit AB occupies FCC basis positions 0 and 1  → (0,0,0) and (½,½,0)
-Subunit CD occupies FCC basis positions 2 and 3  → (½,0,½) and (0,½,½)
-
-This guarantees exactly N/2 copies of each subunit type per unit cell tile.
+Build an cubic crystal lattice from two PDB subunits.
 
 Usage
 -----
@@ -21,7 +16,6 @@ Arguments
 ---------
     --ab             PDB file for the AB-type subunit (chains A+B)
     --cd             PDB file for the CD-type subunit (chains C+D)
-    --lattice-param  FCC lattice parameter in Angstroms (edge length of cubic unit cell)
     --nx, --ny, --nz Number of unit cells along each axis (default: 1 each)
     --output         Output PDB filename (default: fcc_lattice.pdb)
     --center         If set, center the entire lattice at the origin before writing
@@ -52,11 +46,9 @@ def parse_args():
                     help="PDB file for AB subunit")
     p.add_argument("--cd",            default=f'{HBV_ENM_PATH}/scripts/important_oligomer_pdbs/cg_C1D1_avg.pdb',
                    help="PDB file for CD subunit")
-    p.add_argument("--lattice-param", default=100,  type=float,
-                   help="Cubic lattice spacing parameter in Angstroms (> length of subunit = 85Å)")
     p.add_argument("--box_length", default=500,  type=float,
                    help="Box length in Angstroms (> length of subunit = 85Å)")
-    p.add_argument("--N",            default=20,      type=int,
+    p.add_argument("--N",            default=60,      type=int,
                    help="Number of subunits (should be a multiple of 2 for an equal number of dimers per dimer type)")
     p.add_argument("--output_dir",        default=f"{HBV_ENM_PATH}/scripts/lattice_pdbs",
                    help="Output PDB directory")
@@ -69,7 +61,7 @@ def parse_args():
 # cubic site generation
 # ---------------------------------------------------------------------------
 
-def generate_fcc_sites(a: float, n_per_length: int) -> list:
+def generate_lattice_sites(a: float, n_per_length: int) -> list:
     """
     Return a list of ([x1, y1, z1], [x2, y2, z2]...) for a cubic lattice
 
@@ -138,7 +130,6 @@ def relabel_subunit(u: mda.Universe, chain_map: dict, copy_num: int) -> mda.Univ
 def build_lattice(
     ab_pdb: str,
     cd_pdb: str,
-    a: float,
     box_length: float,
     n_dimers: int,
     output_dir: str,
@@ -150,7 +141,8 @@ def build_lattice(
 
     # --- prevents overcrowding ---
     n_per_length = math.ceil(n_dimers**(1/3))
-    if (n_per_length*a > box_length):
+    spacing = box_length/n_per_length
+    if (spacing < 85):
         raise("Box length is too small for number of dimers. Use fcc lattice script instead")
 
     # --- load template subunits ---
@@ -169,9 +161,9 @@ def build_lattice(
     cd_chain_map = {ch: ch for ch in set(u_cd.atoms.chainIDs)}
 
     # --- generate cubic lattice sites ---
-    sites = generate_fcc_sites(a, n_per_length)
+    sites = generate_lattice_sites(spacing, n_per_length)
 
-    print(f"\nLattice: {n_per_length}×{n_per_length}×{n_per_length} unit cells | a = {a} Å")
+    print(f"\nLattice: {n_per_length}×{n_per_length}×{n_per_length} unit cells | cell spacing = {spacing} Å")
     print(f"  {n_per_length**3} total sites created ({n_dimers/ 2} AB + {n_dimers/2} CD)")
 
     # --- place and relabel every copy ---
@@ -234,7 +226,6 @@ if __name__ == "__main__":
     build_lattice(
         ab_pdb       = args.ab,
         cd_pdb       = args.cd,
-        a            = args.lattice_param,
         box_length   = args.box_length,
         n_dimers     = args.N,
         output_dir   = args.output_dir,

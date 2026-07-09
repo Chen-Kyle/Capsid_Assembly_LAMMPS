@@ -281,11 +281,13 @@ def write_lammps_data(outfile, positions_ang, harmonic_bonds, type_map, atom_to_
     n_bonds      = len(harm_typed)
 
     if box is not None:
-        lo = np.array([0.0, 0.0, 0.0])
-        hi = np.array(box, dtype=float)
-    else:
         lo = positions_ang.min(axis=0) - 50.0
-        hi = positions_ang.max(axis=0) + 50.0
+        hi = lo + box
+        # lo = np.array([0.0, 0.0, 0.0])
+        # hi = np.array(box, dtype=float)
+    else:
+        lo = positions_ang.min(axis=0) - 15.0
+        hi = positions_ang.max(axis=0) + 15.0
 
     with open(outfile, 'w') as f:
         f.write('LAMMPS data file: HBV capsid CG Go model\n\n')

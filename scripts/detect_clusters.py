@@ -50,7 +50,7 @@ def parse_args():
                    help='Directory containing A_contacts.txt … D_contacts.txt')
     p.add_argument('--cutoff',    type=float, default=8.0,
                    help='Sets cutoff distance for identifying bonds')
-    p.add_argument('--contacts',    type=int, default=10,
+    p.add_argument('--contacts',    type=int, default=1,
                    help='The number of contacts to be considered bonded')
     p.add_argument('--output_dir',     default=f'{HBV_ENM_PATH}/raw_data/cluster_data',
                    help='Output directory for bond analysis data')
@@ -67,6 +67,9 @@ def parse_args():
 #   C_contacts.txt : C chain contacts D chain  (A and B excluded, not-D{mn} leaves D other)
 #   D_contacts.txt : D chain contacts B chain  (C and A excluded)
 CONTACT_PARTNER_CHAIN = {'A': 'A', 'B': 'C', 'C': 'D', 'D': 'B'}
+
+# Maps the monomer from one dimer to its other monomer pair
+DIMER_MAP = {'A' : 'B', 'B' : 'A', 'C' : 'D', 'D' : 'C'}
 
 def build_native_contacts(contact_dir):
     """
@@ -171,7 +174,7 @@ def parse_frames_computed_cutoffs(pdb_file, traj_file, contact_dir):
     iface_bonds = defaultdict(lambda: defaultdict(int))
     iface_res_data = defaultdict(lambda: defaultdict(dict))
 
-    stdev_bond = 2 #Gaussian stdev in the histogram is about 2-3 angstroms
+    stdev_bond = 4 #Gaussian stdev in the histogram is about 2-3 angstroms
 
     # Build per-pair cutoff lookup and pair list from the computed cutoff files
     cols = ['resname1', 'resnum1', 'resname2', 'resnum2', 'dist', 'score', 'computed_cutoff']
@@ -200,7 +203,7 @@ def parse_frames_computed_cutoffs(pdb_file, traj_file, contact_dir):
             cutoff = computed_cutoffs[(iface, res1, res2)] + stdev_bond
             pair_selections.append((iface, res1, res2, ag1, ag2, cutoff))
 
-    skin          = 35.0  # Angstroms beyond cutoff used to build the neighbor list
+    skin          = 35.0  # 35 # Angstroms beyond cutoff used to build the neighbor list
     rebuild_every = 10   # rebuild neighbor list every N frames
     nl = {}              # idx -> array of [i, j] atom-index pairs within cutoff + skin
 
@@ -209,6 +212,7 @@ def parse_frames_computed_cutoffs(pdb_file, traj_file, contact_dir):
 
         # Rebuild neighbor list every rebuild_every frames
         if frame % rebuild_every == 0:
+            #print(f"Rebuilding list, Frame #:{frame}")
             nl = {}
             for idx, (iface, res1, res2, ag1, ag2, cutoff) in enumerate(pair_selections):
                 pairs = capped_distance(
@@ -242,6 +246,14 @@ def parse_frames_computed_cutoffs(pdb_file, traj_file, contact_dir):
 # Cluster Functions
 # ---------------------------------------------------------------------------
 
+def get_partner(residue_name):
+    """
+    Returns the monomer that is on the other side of the dimer
+    """
+    res_partner_chain = DIMER_MAP[residue_name[0]]
+    res_partner = res_partner_chain + residue_name[1:]
+    return res_partner
+
 def build_clusters(iface_bonds, contacts_per_bond):
     """
     For each frame, finds connected components of monomers linked by
@@ -260,13 +272,19 @@ def build_clusters(iface_bonds, contacts_per_bond):
         # Collect active edges (meet the threshold)
         active_edges = {pair: count for pair, count in frame_data.items()
                         if count >= contacts_per_bond}
-
+        
         # Build adjacency from active edges
         # A dictionary containing each segid as a key and a set of its "bonded" neighbors for the values
         neighbors = defaultdict(set)
         for (s1, s2) in active_edges:
             neighbors[s1].add(s2)
             neighbors[s2].add(s1)
+
+            # Adds on the respective monomer for the dimer pair
+            s1partner_dimer = get_partner(s1)
+            s2partner_dimer = get_partner(s2)
+            neighbors[s1].add(s1partner_dimer)
+            neighbors[s2].add(s2partner_dimer)
 
         # BFS to find connected components
         visited = set()
@@ -287,13 +305,17 @@ def build_clusters(iface_bonds, contacts_per_bond):
 
             # Collect all active edges whose both endpoints are in this component
             ifaces = {pair: count for pair, count in active_edges.items()
-                      if pair[0] in component and pair[1] in component}
+                      if ((pair[0] in component and pair[1] in component) and not (pair[1] == get_partner(pair[0])))}
+
 
             frame_clusters.append({
                 'segments':   frozenset(component),
                 'interfaces': ifaces,
             })
-
+        
+        print(f"Frame_clusters: {frame_clusters}")
+        print(f"Frame number:{frame}  Number of clusters:{len(frame_clusters)}")
+        # input()
         clusters[frame] = frame_clusters
 
     return clusters
@@ -314,6 +336,8 @@ def save_cluster_data(pdb_file, traj_file, contact_dir, contacts_per_bond, outpu
             'iface_bonds':    iface_bonds,
             'iface_res_data': iface_res_data,
             'clusters':       clusters,
+            'pdb_file':       pdb_file,
+            'traj_file':      traj_file,
         }
 
     Returns the same three objects.
@@ -331,6 +355,8 @@ def save_cluster_data(pdb_file, traj_file, contact_dir, contacts_per_bond, outpu
             'iface_bonds':    {k: dict(v) for k, v in iface_bonds.items()},
             'iface_res_data': {k: dict(v) for k, v in iface_res_data.items()},
             'clusters':       clusters,
+            'pdb_file':       pdb_file,
+            'traj_file':      traj_file,
         }, f)
     print(f"Saved cluster data to {output_path}")
 

@@ -104,14 +104,17 @@ def detect_dimer_list(u_sim):
     """
     segids = set(u_sim.select_atoms('name CA').segids)
     n_segs = len(u_sim.select_atoms('name CA'))
-    n_dimers = int(n_segs/596) + 2
+    n_dimers = int(n_segs/298) + 2
+
+    print(f"segids:{segids}")
+    print(f"Numbers of dimers:{n_dimers}")
+
     dimer_list = []
     for i in range(1, n_dimers):
         if f'A{i}' in segids and f'B{i}' in segids:
             dimer_list.append(f'A{i}B{i}')
         if f'C{i}' in segids and f'D{i}' in segids:
             dimer_list.append(f'C{i}D{i}')
-    print(dimer_list)
     return dimer_list
 
 
@@ -124,13 +127,8 @@ def build_harmonic_bonds(u_sim, dimer_list, conndir):
     """
     ca = u_sim.select_atoms('name CA')
     pos = ca.positions   # Å, shape (N, 3)
-
     bonds = []
     offset = 0
-    i0 = 0
-    j0 = 0
-    loop_runs = 0
-    dname = ""
     for dname in dimer_list:
         letters = [c for c in dname if c.isalpha()]
         numbers = [c for c in dname if c.isdigit()]
@@ -150,6 +148,8 @@ def build_harmonic_bonds(u_sim, dimer_list, conndir):
             bonds.append((i0, j0, r0))
 
         offset += n_dimer
+    print(f"offset:{offset}")
+    input()
     return bonds
 
 # ---------------------------------------------------------------------------
@@ -369,7 +369,7 @@ def write_native_contact_pair_coeffs(output_dir, contacts, type_map):
 # PDB connectivity writer
 # ---------------------------------------------------------------------------
 
-def write_connectivity_to_pdb(conn_data, pdb_file, cutoff_distance):
+def write_connectivity_to_pdb(conn_data, pdb_file):
     '''
     Write out bond connectivity to a new pdb file along with CA positions.
     For now do this manually, eventually we should use MDAnalysis for more complicated situations
@@ -378,7 +378,7 @@ def write_connectivity_to_pdb(conn_data, pdb_file, cutoff_distance):
         old_pdb_lines = f.readlines()
 
     if not any(l.startswith('CONECT') for l in old_pdb_lines):
-        new_pdb_file = pdb_file.replace('.pdb', f'_with_connectivity_cutoff={cutoff_distance}.pdb')
+        new_pdb_file = pdb_file.replace('.pdb', f'_with_connectivity.pdb')
         with open(new_pdb_file, 'w') as f:
             for line in old_pdb_lines[:-1]:
                 f.write(line)
@@ -424,7 +424,7 @@ def main():
     if args.buildconn:
         print('Writing PDB with bond connectivity...')
         conn_data = np.array([[i0 + 1, j0 + 1] for (i0, j0, _) in harmonic_bonds])
-        write_connectivity_to_pdb(conn_data, args.pdb, 'from_connectivity_files')
+        write_connectivity_to_pdb(conn_data, args.pdb)
 
     print('Building native contacts...')
     native_contacts = build_native_contacts(args.contactdir)

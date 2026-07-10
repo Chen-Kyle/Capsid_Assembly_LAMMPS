@@ -289,7 +289,7 @@ def build_clusters(iface_bonds, contacts_per_bond):
         # BFS to find connected components
         visited = set()
         frame_clusters = []
-        for start in neighbors:
+        for start in list(neighbors):
             if start in visited:
                 continue
             component = set()
@@ -301,7 +301,7 @@ def build_clusters(iface_bonds, contacts_per_bond):
                 visited.add(curr)
                 component.add(curr)
                 # Set subtraction - removes all visited interfaces from the queue
-                queue.extend(neighbors[curr] - visited)
+                queue.extend(neighbors.get(curr, set()) - visited)
 
             # Collect all active edges whose both endpoints are in this component
             ifaces = {pair: count for pair, count in active_edges.items()
@@ -313,9 +313,9 @@ def build_clusters(iface_bonds, contacts_per_bond):
                 'interfaces': ifaces,
             })
         
-        print(f"Frame_clusters: {frame_clusters}")
-        print(f"Frame number:{frame}  Number of clusters:{len(frame_clusters)}")
-        # input()
+        # print(f"Frame_clusters: {frame_clusters}")
+        # print(f"Frame number:{frame}  Number of clusters:{len(frame_clusters)}")
+        # # input()
         clusters[frame] = frame_clusters
 
     return clusters

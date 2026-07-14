@@ -148,8 +148,6 @@ def build_harmonic_bonds(u_sim, dimer_list, conndir):
             bonds.append((i0, j0, r0))
 
         offset += n_dimer
-    print(f"offset:{offset}")
-    input()
     return bonds
 
 # ---------------------------------------------------------------------------

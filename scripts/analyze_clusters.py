@@ -52,6 +52,17 @@ def load_pickle(path):
         return pickle.load(f)
 
 
+def get_enative(path):
+    """
+    Extracts the Enative float from a file path containing 'Enative=<value>'.
+    e.g. '.../Enative=1.5_seed=42/...' -> 1.5
+    Returns None if not found.
+    """
+    import re
+    match = re.search(r'Enative=([0-9]+(?:\.[0-9]+)?)', path)
+    return float(match.group(1)) if match else None
+
+
 def get_probability(iface_contacts, contacts_per_bond):
     """
     Returns the fraction of time each interface was bonded given
@@ -79,7 +90,7 @@ def get_probability(iface_contacts, contacts_per_bond):
 # Plotting Functions
 # ---------------------------------------------------------------------------
 
-def plot_iface_contacts(iface_contacts, output_dir):
+def plot_iface_contacts(iface_contacts, output_dir, enative=None):
     """
     Plot each unique interface as a line with smart formatting
     """
@@ -93,52 +104,39 @@ def plot_iface_contacts(iface_contacts, output_dir):
     step = 10
     frames = all_frames[::step]
     n_ifaces = len(all_ifaces)
-    
+
     print(f"Plotting {n_ifaces} interfaces across {len(frames)} frames")
-    
-    # IMPROVEMENT 1: Adaptive figure size based on data
-    # Wider if many interfaces, narrower if few
-    fig_width = max(16, 20 + (n_ifaces / 50))  # Scales with complexity
-    
-    fig, ax = plt.subplots(figsize=(fig_width, 7), dpi=100)  # Lower DPI, larger fig
-    
-    # IMPROVEMENT 2: Better coloring scheme
+
+    fig_width = max(16, 20 + (n_ifaces / 50))
+    fig, ax = plt.subplots(figsize=(fig_width, 7), dpi=100)
+
     colors = plt.cm.tab20c(np.linspace(0, 1, min(n_ifaces, 20)))
     if n_ifaces > 20:
         colors = plt.cm.hsv(np.linspace(0, 0.9, n_ifaces))
-    
-    # IMPROVEMENT 3: Plot with better styling
+
     for idx, iface in enumerate(all_ifaces):
         bonds = pd.Series([iface_contacts.get(f, {}).get(iface, 0) for f in frames])
         smoothed = bonds.rolling(window=50, center=True, min_periods=1).mean()
         color = colors[idx % len(colors)]
         ax.plot(frames, bonds, linewidth=0.5, alpha=0.2, color=color)
-        ax.plot(frames, smoothed,
-                label=iface,
-                linewidth=1.5,
-                alpha=0.8,
-                color=color)
-    
-    # IMPROVEMENT 4: Better axis labels and title
+        ax.plot(frames, smoothed, label=iface, linewidth=1.5, alpha=0.8, color=color)
+
     ax.set_xlabel("Frame", fontsize=12, fontweight='bold')
     ax.set_ylabel("Number of Contacts", fontsize=12, fontweight='bold')
-    ax.set_title(f"Native Contacts per Interface ({n_ifaces} unique)", 
+    enative_str = f" — Enative={enative}" if enative is not None else ""
+    ax.set_title(f"Native Contacts per Interface ({n_ifaces} unique){enative_str}",
                  fontsize=14, fontweight='bold', pad=20)
-    ax.grid(True, alpha=0.3, linestyle='--')  # Subtle grid for readability
-    
-    # IMPROVEMENT 5: Smart legend handling
+    ax.grid(True, alpha=0.3, linestyle='--')
+
     if n_ifaces <= 20:
-        # Small number of interfaces: show legend
         ax.legend(loc='upper left', fontsize=8)
     else:
-        # Too many interfaces: sample legend or omit
-        # Option A: Show every Nth interface
         sample_indices = np.linspace(0, n_ifaces - 1, min(15, n_ifaces), dtype=int)
         handles, labels = ax.get_legend_handles_labels()
         ax.legend([handles[i] for i in sample_indices],
                   [labels[i] for i in sample_indices],
                   bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8)
-    
+
     plt.tight_layout()
     plt.savefig(f"{output_dir}/iface_contacts.png", dpi=150, bbox_inches='tight')
     print(f"Saved to {output_dir}/iface_contacts.png")
@@ -146,7 +144,7 @@ def plot_iface_contacts(iface_contacts, output_dir):
     return
 
 
-def plot_dists(iface_res_data, interface_name, output_dir):
+def plot_dists(iface_res_data, interface_name, output_dir, enative=None):
     """
     4x5 panel plot of distance distributions for each native contact
     in the given interface across all frames.
@@ -193,7 +191,8 @@ def plot_dists(iface_res_data, interface_name, output_dir):
     for idx in range(len(contacts), 20):
         axes[idx].set_visible(False)
 
-    fig.suptitle(f"Native Contact Distance Distributions: {interface_name}",
+    enative_str = f" — Enative={enative}" if enative is not None else ""
+    fig.suptitle(f"Native Contact Distance Distributions: {interface_name}{enative_str}",
                  fontsize=14, fontweight='bold')
     plt.tight_layout(rect=[0, 0, 1, 0.97])
     plt.subplots_adjust(hspace=0.55)
@@ -202,15 +201,66 @@ def plot_dists(iface_res_data, interface_name, output_dir):
     plt.show()
 
 
+def plot_clusters_vs_time(clusters, output_dir, enative=None):
+    """
+    Two-panel plot across all frames:
+      Top    : size of the largest cluster (number of segids)
+      Bottom : number of clusters of size >= 2 (bonded assemblies)
+    """
+    frames = sorted(clusters.keys())
+
+    largest_cluster_size = []
+    n_bonded_clusters    = []
+
+    for f in frames:
+        frame_clusters = clusters[f]
+        sizes = [len(c['segments']) for c in frame_clusters]
+
+        largest_cluster_size.append(max(sizes) if sizes else 0)
+        n_bonded_clusters.append(sum(1 for s in sizes if s >= 2))
+
+    largest  = pd.Series(largest_cluster_size, index=frames)
+    n_bonded = pd.Series(n_bonded_clusters,    index=frames)
+
+    window = max(1, len(frames) // 50)
+    largest_smooth  = largest.rolling(window=window,  center=True, min_periods=1).mean()
+    n_bonded_smooth = n_bonded.rolling(window=window, center=True, min_periods=1).mean()
+
+    _, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 8), sharex=True)
+
+    ax1.plot(frames, largest,        linewidth=0.5, alpha=0.3, color='steelblue')
+    ax1.plot(frames, largest_smooth, linewidth=1.8, alpha=0.9, color='steelblue')
+    ax1.set_ylabel("Largest Cluster Size\n(# of segids)", fontsize=11, fontweight='bold')
+    enative_str = f" — Enative={enative}" if enative is not None else ""
+    ax1.set_title(f"Cluster Assembly vs Time{enative_str}", fontsize=13, fontweight='bold', pad=12)
+    ax1.grid(True, alpha=0.3, linestyle='--')
+
+    ax2.plot(frames, n_bonded,        linewidth=0.5, alpha=0.3, color='darkorange')
+    ax2.plot(frames, n_bonded_smooth, linewidth=1.8, alpha=0.9, color='darkorange')
+    ax2.set_ylabel("Number of Bonded\nClusters (size ≥ 2)", fontsize=11, fontweight='bold')
+    ax2.set_xlabel("Frame", fontsize=11, fontweight='bold')
+    ax2.grid(True, alpha=0.3, linestyle='--')
+
+    plt.tight_layout()
+    out = f"{output_dir}/clusters_vs_time.png"
+    plt.savefig(out, dpi=150, bbox_inches='tight')
+    print(f"Saved to {out}")
+    plt.show()
+
+
 if __name__ == "__main__":
     args = parse_args()
     data = load_pickle(args.file)
+    enative = get_enative(args.file)
+    print(f"data:{data.keys()}")
+    print(f"pdb_file: {data['pdb_file']}")
 
     if args.interactive:
         functions = {
-            1: ("get_probability",     lambda: get_probability(data['iface_bonds'], contacts_per_bond=10)),
-            2: ("plot_iface_contacts", lambda: plot_iface_contacts(data['iface_bonds'], args.output_dir)),
-            3: ("plot_dists",          lambda: plot_dists(data['iface_res_data'], None, args.output_dir)),
+            1: ("get_probability",       lambda: get_probability(data['iface_bonds'], contacts_per_bond=10)),
+            2: ("plot_iface_contacts",   lambda: plot_iface_contacts(data['iface_bonds'], args.output_dir, enative)),
+            3: ("plot_dists",            lambda: plot_dists(data['iface_res_data'], None, args.output_dir, enative)),
+            4: ("plot_clusters_vs_time", lambda: plot_clusters_vs_time(data['clusters'], args.output_dir, enative)),
         }
         for n, (name, fn) in functions.items():
             run = input(f"[{n}] {name} — run? (y/n): ")

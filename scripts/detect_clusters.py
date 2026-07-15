@@ -50,10 +50,11 @@ def parse_args():
                    help='Directory containing A_contacts.txt … D_contacts.txt')
     p.add_argument('--cutoff',    type=float, default=8.0,
                    help='Sets cutoff distance for identifying bonds')
-    p.add_argument('--contacts',    type=int, default=1,
+    p.add_argument('--contacts',    type=int, default=10,
                    help='The number of contacts to be considered bonded')
-    p.add_argument('--output_dir',     default=f'{HBV_ENM_PATH}/raw_data/cluster_data',
-                   help='Output directory for bond analysis data')
+    p.add_argument('--output_dir',     default='',
+                   help=r'By default the pkl file is sent to traj_file dir' \
+                   r'This argument adds a path: {output_dir}{traj_file_dir}')
     return p.parse_args()
 
 
@@ -209,6 +210,7 @@ def parse_frames_computed_cutoffs(pdb_file, traj_file, contact_dir):
 
     for ts in u.trajectory:
         frame = ts.frame
+        print(f'Frame number:{frame}')
 
         # Rebuild neighbor list every rebuild_every frames
         if frame % rebuild_every == 0:
@@ -313,9 +315,9 @@ def build_clusters(iface_bonds, contacts_per_bond):
                 'interfaces': ifaces,
             })
         
-        # print(f"Frame_clusters: {frame_clusters}")
-        # print(f"Frame number:{frame}  Number of clusters:{len(frame_clusters)}")
-        # # input()
+        print(f"Frame_clusters: {frame_clusters}")
+        print(f"Frame number:{frame}  Number of clusters:{len(frame_clusters)}")
+        input()
         clusters[frame] = frame_clusters
 
     return clusters
@@ -346,9 +348,8 @@ def save_cluster_data(pdb_file, traj_file, contact_dir, contacts_per_bond, outpu
     clusters = build_clusters(iface_bonds, contacts_per_bond)
     
     print("\nSaving cluster data...\n")
-    output_path = traj_file.split("/trajectory_files/")[-1]
-    output_path = f"{output_dir}/{output_path}"
-    output_path = output_path.replace(".dcd", ".pkl")
+    output_path = f"{output_dir}{traj_file}"
+    output_path = output_path.replace("seg.dcd", "cluster_data.pkl")
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "wb") as f:
         pickle.dump({

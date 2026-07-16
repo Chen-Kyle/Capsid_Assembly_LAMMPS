@@ -103,8 +103,8 @@ def detect_dimer_list(u_sim):
     interleaved AB/CD as in the original decamer setup.
     """
     segids = set(u_sim.select_atoms('name CA').segids)
-    n_segs = len(u_sim.select_atoms('name CA'))
-    n_dimers = int(n_segs/298) + 2
+    segidNums = set(int(s[1:]) for s in segids)
+    n_dimers = max(segidNums) + 1
 
     print(f"segids:{segids}")
     print(f"Numbers of dimers:{n_dimers}")
@@ -129,6 +129,7 @@ def build_harmonic_bonds(u_sim, dimer_list, conndir):
     pos = ca.positions   # Å, shape (N, 3)
     bonds = []
     offset = 0
+    print(dimer_list)
     for dname in dimer_list:
         letters = [c for c in dname if c.isalpha()]
         numbers = [c for c in dname if c.isdigit()]

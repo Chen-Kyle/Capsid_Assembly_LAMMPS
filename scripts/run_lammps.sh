@@ -2,9 +2,8 @@
 #SBATCH --account=hagan-lab
 #SBATCH --partition=hagan-compute
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=8
+#SBATCH --ntasks-per-node=64
 #SBATCH --output=slurm_%j.out
-#SBATCH --nodelist=compute-9-0
 
 
 # HBV Decamer CG Oligomer Simulation
@@ -35,7 +34,7 @@
 # Number of seeds passed as first argument (default 5)
 seed=${1:-42}
 
-# PDB files (adjust paths if yours differ)
+# PDB files
 pdb_default="${HBV_ENM_PATH}/scripts/important_oligomer_pdbs/abcd_capsid.pdb" #"important_oligomer_pdbs/cg_ABCD_separate.pdb"
 PDB=${2:-${pdb_default}}
 
@@ -91,4 +90,6 @@ time mpirun -n $SLURM_NTASKS lmp -in lammps_oligomer.in  \
     -var nsteps ${nsteps}                    \
     -var myseed ${seed}                      \
 
-echo "Run complete."
+# Starts running detect_clusters on the trajectory file
+echo "Running sbatch run_detect_clusters.sh on ${output_dir}" 
+sbatch run_detect_clusters.sh ${PDB} ${output_dir}/seg.dcd 

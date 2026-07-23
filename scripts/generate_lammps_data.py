@@ -58,7 +58,7 @@ CONTACT_PARTNER_CHAIN = {'A': 'A', 'B': 'C', 'C': 'D', 'D': 'B'}
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument('--pdb',        default='decamer_sep.pdb',
+    p.add_argument('--pdb',        default=f'{HBV_ENM_PATH}/scripts/important_oligomer_pdbs/pentamer_avg.pdb',
                    help='Simulation-start PDB (separated decamer)')
     p.add_argument('--conndir',    default=f'{HBV_ENM_PATH}/scripts/connect_files',
                    help='Directory containing cg_*_connectivity.txt files')
@@ -104,17 +104,18 @@ def detect_dimer_list(u_sim):
     """
     segids = set(u_sim.select_atoms('name CA').segids)
     segidNums = set(int(s[1:]) for s in segids)
-    n_dimers = max(segidNums) + 1
+    n_dimers = len(segidNums)
 
     print(f"segids:{segids}")
     print(f"Numbers of dimers:{n_dimers}")
 
     dimer_list = []
-    for i in range(1, n_dimers):
+    for i in segidNums:
         if f'A{i}' in segids and f'B{i}' in segids:
             dimer_list.append(f'A{i}B{i}')
         if f'C{i}' in segids and f'D{i}' in segids:
             dimer_list.append(f'C{i}D{i}')
+    print(dimer_list)
     return dimer_list
 
 

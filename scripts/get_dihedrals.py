@@ -42,11 +42,13 @@ def parse_args():
     p.add_argument('--pdb',
                    help='Path to the pdb file', default=f'{HBV_ENM_PATH}/scripts/important_oligomer_pdbs/pentamer_avg.pdb')
     p.add_argument('--traj',
-                   help='Path to the trajectory to analyze', default=f'{HBV_ENM_PATH}/scripts/lammps_out/seg.dcd')
+                   help='Path to the trajectory to analyze', default=f'{HBV_ENM_PATH}/scripts/dihedral_lammps_out/seg.dcd')
     p.add_argument('--pkl',
-                   help='Path to the trajectory to analyze', default=f'{HBV_ENM_PATH}/scripts/lammps_out/seg_cluster_data.pkl')
+                   help='Path to the trajectory to analyze', default=f'{HBV_ENM_PATH}/scripts/dihedral_lammps_out/seg_cluster_data.pkl')
     p.add_argument('--out',
                    help='Directory path to send the data to', default=f'{HBV_ENM_PATH}/raw_data')
+    p.add_argument("--all",        action="store_true",
+                   help="Finds all possible dihedrals and then gets their average")
     return p.parse_args()
 
 
@@ -69,11 +71,24 @@ def get_partner(residue_name):
     res_partner = res_partner_chain + residue_name[1:]
     return res_partner
 
-def get_chains(interface_name):
+def get_segids(interface_name):
     """
     Extracts the chainIDs out of the interface name string
     """
-    chains = interface_name.split('-')
+    segids = interface_name.split('-')
+    return segids
+
+def get_dimer_group(dimer_name):
+    """
+    Gets just the chain letters from a dimer name (e.g. 'A1-B1') and orders
+    the result to be either 'AB' or 'CD', so dimers can be grouped regardless
+    of monomer number or letter order.
+    """
+    chains = ''.join(letter for letter in dimer_name if letter.isalpha())
+    if chains == "DC":
+        chains = "CD"
+    if chains == "BA":
+        chains = "AB"
     return chains
 
 def cross_product(vector1, vector2):
@@ -122,7 +137,7 @@ def detect_dimer_list(u_sim):
             dimer_list.append(f'C{i}-D{i}')
     return dimer_list
 
-def find_partner_dimers(pdb_file, traj_file, dimer_name, pkl_data):
+def find_partner_dimers(dimer_name, pkl_data):
     """
     Finds the dimers that are connected to the one given to find the dihedral angles of the inputted dimer
 
@@ -131,7 +146,6 @@ def find_partner_dimers(pdb_file, traj_file, dimer_name, pkl_data):
             [dimer1, dimer2] :  The other two dimers making up the triangle. 
                                 Necessary for calculating the normal vector needed for the dihedral
     """
-    u = mda.Universe(pdb_file, traj_file)
     iface_bonds = pkl_data['iface_bonds']
     
     frame_data = iface_bonds[0]
@@ -139,7 +153,7 @@ def find_partner_dimers(pdb_file, traj_file, dimer_name, pkl_data):
     active_edges = {pair: count for pair, count in frame_data.items()
                     if count >= CONTACTS_PER_BOND}
 
-    chainID1, chainID2 = get_chains(dimer_name)
+    chainID1, chainID2 = get_segids(dimer_name)
     dimer1_active_edges = {pair: count for pair, count in active_edges.items()
                             if chainID1 in pair}
     dimer2_active_edges = {pair: count for pair, count in active_edges.items()
@@ -172,6 +186,7 @@ def find_partner_dimers(pdb_file, traj_file, dimer_name, pkl_data):
                             triangle_end_dimers.append(f'{edge1}-{partner1}')
                             triangle_end_dimers.append(f'{edge2}-{partner2}')
                             partner_dimers[f'{partner1}-{partner2}'] = triangle_end_dimers
+                    
     
     print(f'partner_dimers: {partner_dimers}')
     return partner_dimers
@@ -181,13 +196,12 @@ def find_partner_dimers(pdb_file, traj_file, dimer_name, pkl_data):
 # Dihedral Calculation
 # ---------------------------------------------------------------------------
 
-def calculate_dihedral(pdb_file, traj_file, partner_dimers, outpath, pkl_data):
+def calculate_dihedral(u, partner_dimers):
     """
     Calculates the dihedral angles for every frame and saves it to an outfile:
         {outpath}/{dimer_name}_dihedrals.txt
     """
 
-    u = mda.Universe(pdb_file, traj_file)
     Nframes = len(u.trajectory)
     dihedral_data = np.zeros(Nframes)
 
@@ -199,7 +213,7 @@ def calculate_dihedral(pdb_file, traj_file, partner_dimers, outpath, pkl_data):
     atom_groups = {}
     atom_groups_debug = {}
     for main_vertex in partner_dimers:
-        main_vertex_chains = get_chains(main_vertex)
+        main_vertex_chains = get_segids(main_vertex)
         print(main_vertex_chains)
 
         for vertex_chain in main_vertex_chains:
@@ -212,15 +226,12 @@ def calculate_dihedral(pdb_file, traj_file, partner_dimers, outpath, pkl_data):
     # Should try introducing some testing logic that monitors active_edges and then fails when any of the interfaces disappears from active_edges in any frame
     for ts in u.trajectory:
         frame = ts.frame
-        frame_data = pkl_data['iface_bonds'][frame]
-        active_edges = {pair: count for pair, count in frame_data.items()
-                if count >= CONTACTS_PER_BOND}
         
         base_vectors = []
         for main_vertex in partner_dimers.keys():
             distance_vectors = []
             
-            vertex_chains = get_chains(main_vertex)
+            vertex_chains = get_segids(main_vertex)
             for vertex_chain in vertex_chains:
                 # Gets the vectors for the cross product
                 main_vertex_res132_pos = atom_groups[vertex_chain][0].positions[0]
@@ -235,20 +246,60 @@ def calculate_dihedral(pdb_file, traj_file, partner_dimers, outpath, pkl_data):
             
         dotted = dot_product(base_vectors[0], base_vectors[1])
         dihedral = np.arccos(abs(dotted))
-
-        print(dihedral)
-
         dihedral_data[frame] = dihedral
 
     return dihedral_data
 
 def plot_dihedrals(dihedral_data):
-    plt.hist(dihedral_data, bins=30)
+    # plt.hist(dihedral_data, alpha=0.6, density=True, bins=50)
+    # plt.show()
+    fig, ax = plt.subplots()
+    for chains, values in dihedral_data.items():
+        mean = np.mean(values)
+        stdev = np.std(values)
+        weights = np.ones_like(values) / len(values)
+        line = ax.hist(values, bins=30, alpha=0.6, weights=weights,
+                        label=f'{chains} (μ={mean:.3f}, σ={stdev:.3f})')
+        ax.axvline(mean, color=line[2][0].get_facecolor(), linestyle='--', linewidth=1)
+
+    ax.set_xlabel('Dihedral angle (rad)')
+    ax.set_ylabel('Relative Frequency')
+    ax.legend()
     plt.show()
 
 if __name__ == '__main__':
     args = parse_args()
     pkl_data = load_pickle(args.pkl)
-    partner_dimers = find_partner_dimers(args.pdb, args.traj, args.dimer, pkl_data)
-    dihedral_data = calculate_dihedral(args.pdb, args.traj, partner_dimers, args.out, pkl_data)
-    plot_dihedrals(dihedral_data)
+    u = mda.Universe(args.pdb, args.traj)
+
+    # Runs if the tag is given
+    if args.all:
+        dimers = detect_dimer_list(u)
+        dihedral_groups = {}
+
+        for dimer in dimers:
+            print(f"\ndimer: {dimer}\n")
+
+            group = get_dimer_group(dimer)
+            partner_dimers = find_partner_dimers(dimer, pkl_data)
+            if len(partner_dimers) != 2:
+                print(f"------Dihedral cannot be calculated for: {dimer}------")
+            else:
+                print(f"\n\n####### partner_dimers: {partner_dimers} ######")
+                # Calculates the dihedral for valid pentamers
+                dihedral_data = calculate_dihedral(u, partner_dimers)
+                dihedral_groups.setdefault(group, []).append(dihedral_data)
+                print(f"####### Successfully computed dihedrals ######")
+
+        # Averages across all dimers within each group (AB, CD), frame by frame
+        avg_dihedrals = {group: np.mean(np.array(arrays), axis=0)
+                          for group, arrays in dihedral_groups.items()}
+        plot_dihedrals(avg_dihedrals)
+        
+    else:
+        partner_dimers = find_partner_dimers(args.dimer, pkl_data)
+        if len(partner_dimers) != 2:
+            print(f"------Dihedral cannot be calculated for: {args.dimer}------")
+        else:
+            dihedral_data = calculate_dihedral(u, partner_dimers)
+            plot_dihedrals({get_dimer_group(args.dimer): dihedral_data})

@@ -39,10 +39,6 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument('--dimer',
                    help='Dimer name to check the dihedral of ie: A1-B1', default=f'C1-D1')
-    p.add_argument('--pdb',
-                   help='Path to the pdb file', default=f'{HBV_ENM_PATH}/scripts/important_oligomer_pdbs/pentamer_avg.pdb')
-    p.add_argument('--traj',
-                   help='Path to the trajectory to analyze', default=f'{HBV_ENM_PATH}/scripts/dihedral_lammps_out/seg.dcd')
     p.add_argument('--pkl',
                    help='Path to the trajectory to analyze', default=f'{HBV_ENM_PATH}/scripts/dihedral_lammps_out/seg_cluster_data.pkl')
     p.add_argument('--out',
@@ -270,7 +266,10 @@ def plot_dihedrals(dihedral_data):
 if __name__ == '__main__':
     args = parse_args()
     pkl_data = load_pickle(args.pkl)
-    u = mda.Universe(args.pdb, args.traj)
+    pdb = pkl_data['pdb_file']
+    traj = pkl_data['traj_file']
+
+    u = mda.Universe(pdb, traj)
 
     # Runs if the tag is given
     if args.all:

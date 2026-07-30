@@ -268,6 +268,11 @@ if __name__ == '__main__':
     pkl_data = load_pickle(args.pkl)
     pdb = pkl_data['pdb_file']
     traj = pkl_data['traj_file']
+    try:
+        u = mda.Universe(pdb, traj)
+    except:
+        basename = os.path.basename(args.pkl)
+        traj = args.pkl.replace(basename, "seg.dcd")
 
     u = mda.Universe(pdb, traj)
 

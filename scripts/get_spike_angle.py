@@ -1,5 +1,5 @@
 """
-get_dihedrals.py
+get_spike_angle.py
 Must be used only on specific pdb files:
 - abcd_capsid.pdb
 ...
@@ -120,20 +120,42 @@ def detect_dimer_list(u_sim):
 
 
 # ---------------------------------------------------------------------------
-# Binding Angle Calculation
+# Spike Angle Calculation
 # ---------------------------------------------------------------------------
 
-def calculate_all_binding_angles(u, pkl_data):
+def calculate_spike_angle(u, interface_name, frameNum):
+    """
+    Calculates the spike angle of a specific interface given its name and frame #.
+    Returns the spike angle in radians.
+    """
+    u.trajectory[frameNum]
+
+    distance_vectors = []
+    segids = get_segids(interface_name)
+    for segid in segids:
+        atom_73 = u.select_atoms(f'resid 73 and segid {segid}')
+        atom_58 = u.select_atoms(f'resid 58 and segid {segid}')
+
+        pos1 = atom_73.positions[0]
+        pos2 = atom_58.positions[0]
+        distance_vector = normalize_vector(pos1 - pos2)
+        distance_vectors.append(distance_vector)
+
+    dotted_value = dot_product(distance_vectors[0], distance_vectors[1])
+    spike_angle = np.arccos(np.clip(dotted_value, -1.0, 1.0))
+    return spike_angle
+
+def calculate_all_spike_angles(u, pkl_data):
     """
     For every frame, iterates over all active inter-dimer interfaces and
-    computes the binding angle at each one.
+    computes the spike angle at each one.
 
-    The binding angle at interface "X_i - Y_j" is the angle between:
-        v1 = direction of X_i's dimer axis (X_i -> partner(X_i))
-        v2 = direction of Y_j's dimer axis (Y_j -> partner(Y_j))
+    The spike angle at interface "X_i - Y_j" is the angle between:
+        v1 = spike-tip direction of monomer X_i (resid 73 -> resid 58)
+        v2 = spike-tip direction of monomer Y_j (resid 73 -> resid 58)
 
     Returns:
-        binding_angle_data[interface_name][frame] = angle (radians)
+        spike_angle_data[interface_name][frame] = angle (radians)
     """
     from collections import defaultdict
 
@@ -141,9 +163,10 @@ def calculate_all_binding_angles(u, pkl_data):
 
     # Pre-build atom selections for all segids once
     segids = set(u.select_atoms('name CA').segids)
-    atom_sel = {seg: u.select_atoms(f'resid 132 and segid {seg}') for seg in segids}
+    atom_sel_73 = {seg: u.select_atoms(f'resid 73 and segid {seg}') for seg in segids}
+    atom_sel_58 = {seg: u.select_atoms(f'resid 58 and segid {seg}') for seg in segids}
 
-    binding_angle_data = defaultdict(dict)
+    spike_angle_data = defaultdict(dict)
 
     for ts in u.trajectory:
         frame = ts.frame
@@ -152,22 +175,20 @@ def calculate_all_binding_angles(u, pkl_data):
         for (seg1, seg2), count in frame_data.items():
             if count < CONTACTS_PER_BOND:
                 continue
-            partner1 = get_partner(seg1)
-            partner2 = get_partner(seg2)
-            if any(s not in atom_sel for s in (seg1, seg2, partner1, partner2)):
+            if any(s not in atom_sel_73 or s not in atom_sel_58 for s in (seg1, seg2)):
                 continue
 
-            v1 = normalize_vector(atom_sel[partner1].positions[0] - atom_sel[seg1].positions[0])
-            v2 = normalize_vector(atom_sel[partner2].positions[0] - atom_sel[seg2].positions[0])
+            v1 = normalize_vector(atom_sel_73[seg1].positions[0] - atom_sel_58[seg1].positions[0])
+            v2 = normalize_vector(atom_sel_73[seg2].positions[0] - atom_sel_58[seg2].positions[0])
 
             angle = np.arccos(np.clip(dot_product(v1, v2), -1.0, 1.0))
-            binding_angle_data[f"{seg1}-{seg2}"][frame] = angle
+            spike_angle_data[f"{seg1}-{seg2}"][frame] = angle
 
-    return binding_angle_data
+    return spike_angle_data
 
-def plot_binding_angle_data(binding_angle_data):
+def plot_spike_angle_data(spike_angle_data):
     """
-    Plots binding angle distributions for all 4 sites (A, B, C, D) as overlapping
+    Plots spike angle distributions for all 4 sites (A, B, C, D) as overlapping
     histograms. Each site pools all angles from all interfaces of that type across
     all frames.
     """
@@ -180,7 +201,7 @@ def plot_binding_angle_data(binding_angle_data):
 
     site_angles = {'A site': [], 'B site': [], 'C site': [], 'D site': []}
 
-    for interface, frame_angles in binding_angle_data.items():
+    for interface, frame_angles in spike_angle_data.items():
         group = get_dimer_group(interface)
         site = site_label.get(group)
         if site is None:
@@ -208,7 +229,7 @@ def plot_binding_angle_data(binding_angle_data):
 
     print(f"x_min: {x_min} and x_max: {x_max}")
     ax.set_xlim(x_min, x_max)
-    ax.set_xlabel('Binding angle (rad)')
+    ax.set_xlabel('Spike angle (rad)')
     ax.set_ylabel('Relative Frequency')
     ax.legend()
     fig.tight_layout()
@@ -226,5 +247,5 @@ if __name__ == '__main__':
         traj = args.pkl.replace(basename, "seg.dcd")
         u = mda.Universe(pdb, traj)
 
-    binding_angle_data = calculate_all_binding_angles(u, pkl_data)
-    plot_binding_angle_data(binding_angle_data)
+    spike_angle_data = calculate_all_spike_angles(u, pkl_data)
+    plot_spike_angle_data(spike_angle_data)

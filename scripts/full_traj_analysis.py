@@ -11,7 +11,8 @@ Input arguements:
 
 Output
     Main functions: parse_computed_cutoff, build_all_clusters,
-    build_interface_angle_data, and build_all_well_formed_clusters
+    build_interface_angle_data, build_all_well_formed_clusters, and
+    assign_persistent_cluster_ids
 
     parse_computed_cutoffs returns: 2 dictionaries containing native contact bond data:
     -  iface_contacts[frame_#][B1, C2] = (number of bonds in the B1-C2 interface in frame_#)
@@ -44,9 +45,6 @@ from MDAnalysis.lib.distances import capped_distance
 import warnings
 warnings.filterwarnings("ignore")
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from get_binding_angles import normalize_vector, dot_product
-
 HBV_ENM_PATH = os.environ.get("HBV_ENM_PATH", "/home/kyle/2026_Research/HBV_enm")
 
 # ---------------------------------------------------------------------------
@@ -57,17 +55,45 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument('--pdb',        default=f'{HBV_ENM_PATH}/scripts/important_oligomer_pdbs/cg_ABCD_avg.pdb',
                    help='Simulation-start PDB (separated decamer)')
-    p.add_argument('--traj',       default=f'{HBV_ENM_PATH}/trajectory_files/ABCD_avg_Enative/Enative_traj_files/Enative=1.5_seed=42/seg.dcd',
+    p.add_argument('--traj',       default=f'{HBV_ENM_PATH}/scripts/lammps_out/seg.dcd',
                    help='trajectory file for pdb')
     p.add_argument('--contactdir', default=f'{HBV_ENM_PATH}/scripts/claude_computed_contact_files',
                    help='Directory containing A_contacts.txt … D_contacts.txt')
-    p.add_argument('--contacts',    type=int, default=20,
+    p.add_argument('--contacts',    type=int, default=19,
                    help='The number of contacts to be considered bonded')
     p.add_argument('--output_dir',     default='',
                    help=r'By default the pkl file is sent to traj_file dir' \
                    r'This argument adds a path: {output_dir}{traj_file_dir}')
     return p.parse_args()
 
+# ---------------------------------------------------------------------------
+# Helper functions
+# ---------------------------------------------------------------------------
+
+def dot_product(vector1, vector2):
+    """
+    Takes the dot product of two 3D vectors: vector1 * vector2
+    """
+    dot_product = vector1[0]*vector2[0] +  vector1[1]*vector2[1] + vector1[2]*vector2[2]
+    return dot_product
+
+def normalize_vector(vector):
+    """
+    Normalizes a 3D vector
+    """
+    magnitude = (vector[0]**2 + vector[1]**2 + vector[2]**2)**(1/2)
+    normalized_vector = vector/magnitude
+    return normalized_vector
+
+def minimum_image(diff, box):
+    """
+    Applies the minimum-image convention to a displacement vector, same as
+    the PBC correction used in parse_frames_computed_cutoffs. Without this,
+    a displacement between two atoms that got wrapped into different
+    periodic images (e.g. two residues of the same chain split across a
+    box boundary) can come out with close to the wrong sign/direction.
+    """
+    return diff - box * np.round(diff / box)
 
 # ---------------------------------------------------------------------------
 # Bond Constuction Functions
@@ -103,72 +129,6 @@ def build_native_contacts(contact_dir):
                 (iface, int(row['resnum1']), partner, int(row['resnum2']))
             )
     return contacts
-
-
-def parse_frames(pdb_file, traj_file, contact_dir):
-    """
-    Loops through the trajectory file to look for native contacts
-
-    Returns 2 dictionaries containing native contact bond data:
-    -  iface_type_bonds[frame_#][B1, C2] = (number of bonds in the B1-C2 interface in frame_#)
-    -  iface_res_data[frame_#]{B1 - C2 : ({resid1, resid2: dist_resid1_resid2}, {resid3, resid4 :...}...}
-    """
-    cutoff = 10
-    print("\nParsing contacts in frames...\n")
-    print(f"Using cutoff value of: {cutoff}")
-    iface_bonds = defaultdict(lambda: defaultdict(int))
-    iface_res_data = defaultdict(lambda: defaultdict(dict))
-
-    u = mda.Universe(pdb_file, traj_file)
-    
-    contacts = build_native_contacts(contact_dir)
-    Nframes = len(u.trajectory)
-    print(f"Number of frames: {Nframes}")
-
-    # Pre-compute all selections once
-    pair_selections = []
-    for iface, pairs in contacts.items():
-        for (chain1, res1, chain2, res2) in pairs:
-            ag1 = u.select_atoms(f'resid {res1} and chainID {chain1}')
-            ag2 = u.select_atoms(f'resid {res2} and chainID {chain2}')
-            pair_selections.append((iface, res1, res2, ag1, ag2))
-
-    skin          = 35.0  # Angstroms beyond cutoff used to build the neighbor list
-    rebuild_every = 10    # rebuild neighbor list every N frames
-    nl = {}             # idx -> array of [i, j] atom-index pairs within cutoff + skin
-
-    for ts in u.trajectory:
-        frame = ts.frame
-
-        # Rebuild neighbor list every rebuild_every frames
-        if frame % rebuild_every == 0:
-            nl = {}
-            for idx, (iface, res1, res2, ag1, ag2) in enumerate(pair_selections):
-                pairs = capped_distance(
-                    ag1.positions, ag2.positions,
-                    max_cutoff=cutoff + skin, box=u.dimensions, return_distances=False
-                )
-                if len(pairs) > 0:
-                    nl[idx] = pairs
-
-        # Only check atom pairs stored in the neighbor list
-        box = u.dimensions[:3]
-        for idx, (iface, res1, res2, ag1, ag2) in enumerate(pair_selections):
-            if idx not in nl:
-                continue
-            for (i, j) in nl[idx]:
-                atom1, atom2 = ag1[i], ag2[j]
-                if atom1.segid == atom2.segid:
-                    continue
-                diff = ag1.positions[i] - ag2.positions[j]
-                diff -= box * np.round(diff / box)   # minimum image convention
-                dist = np.sqrt(np.dot(diff, diff))
-                if dist < cutoff:
-                    iface_bonds[frame][(atom1.segid, atom2.segid)] += 1
-                    iface_name = f"{atom1.segid}-{atom2.segid}"
-                    iface_res_data[frame][iface_name][(res1, res2)] = dist
-
-    return iface_bonds, iface_res_data
 
 
 def parse_frames_computed_cutoffs(pdb_file, traj_file, contact_dir):
@@ -276,7 +236,7 @@ def build_all_clusters(iface_bonds, contacts_per_bond):
 
     Returns:
         clusters[frame] = list of dicts, each with:
-            'segments'   : frozenset of segids in the cluster
+            'segids'   : frozenset of segids in the cluster
             'interfaces' : dict mapping (segid1, segid2) -> contact count
                            for every active edge within the cluster
     """
@@ -324,7 +284,7 @@ def build_all_clusters(iface_bonds, contacts_per_bond):
 
 
             frame_clusters.append({
-                'segments':   frozenset(component),
+                'segids':   frozenset(component),
                 'interfaces': ifaces,
             })
         
@@ -371,6 +331,7 @@ def build_interface_angle_data(pdb_file, traj_file, iface_bonds, contacts_per_bo
     for ts in u.trajectory:
         frame = ts.frame
         frame_data = iface_bonds.get(frame, {})
+        box = u.dimensions[:3]
 
         for (segid1, segid2), count in frame_data.items():
             if count < contacts_per_bond:
@@ -380,13 +341,17 @@ def build_interface_angle_data(pdb_file, traj_file, iface_bonds, contacts_per_bo
                 continue
 
             # Binding angle: dimer-axis direction of each monomer (self -> partner, resid 132)
-            v1_bind = normalize_vector(sel_132[partner1].positions[0] - sel_132[segid1].positions[0])
-            v2_bind = normalize_vector(sel_132[partner2].positions[0] - sel_132[segid2].positions[0])
+            diff1_bind = minimum_image(sel_132[partner1].positions[0] - sel_132[segid1].positions[0], box)
+            diff2_bind = minimum_image(sel_132[partner2].positions[0] - sel_132[segid2].positions[0], box)
+            v1_bind = normalize_vector(diff1_bind)
+            v2_bind = normalize_vector(diff2_bind)
             binding_angle = np.arccos(np.clip(dot_product(v1_bind, v2_bind), -1.0, 1.0))
 
             # Spike angle: spike direction of each monomer (resid 58 -> resid 73)
-            v1_spike = normalize_vector(sel_73[segid1].positions[0] - sel_58[segid1].positions[0])
-            v2_spike = normalize_vector(sel_73[segid2].positions[0] - sel_58[segid2].positions[0])
+            diff1_spike = minimum_image(sel_73[segid1].positions[0] - sel_58[segid1].positions[0], box)
+            diff2_spike = minimum_image(sel_73[segid2].positions[0] - sel_58[segid2].positions[0], box)
+            v1_spike = normalize_vector(diff1_spike)
+            v2_spike = normalize_vector(diff2_spike)
             spike_angle = np.arccos(np.clip(dot_product(v1_spike, v2_spike), -1.0, 1.0))
 
             interface_data[frame][f"{segid1}-{segid2}"] = {
@@ -407,14 +372,18 @@ def build_all_well_formed_clusters(iface_bonds, interface_data, contacts_per_bon
 
     Returns the same structure as build_all_clusters:
         clusters[frame] = list of dicts, each with:
-            'segments'   : frozenset of segids in the cluster
+            'segids'   : frozenset of segids in the cluster
             'interfaces' : dict mapping (segid1, segid2) -> contact count
                            for every active edge within the cluster
     """
-    BINDING_ANGLE_RANGE = (0.0, 1.5)  # radians -- tune to the desired binding angle window
-    SPIKE_ANGLE_RANGE   = (0.0, 1.2)  # radians -- tune to the desired spike angle window
+
+    # Parameterized against capsid spike and binding angle data
+    BINDING_ANGLE_RANGE = (0.7, 1.5)  # radians -- tune to the desired binding angle window
+    SPIKE_ANGLE_RANGE   = (0, 1.2)  # radians -- tune to the desired spike angle window
 
     print("\nBuilding well-formed clusters...\n")
+    print(f"Binding Angle range: {BINDING_ANGLE_RANGE}")
+    print(f"Spike Angle range: {SPIKE_ANGLE_RANGE}")
     clusters = {}
 
     for frame, frame_data in iface_bonds.items():
@@ -467,11 +436,60 @@ def build_all_well_formed_clusters(iface_bonds, interface_data, contacts_per_bon
                       if ((pair[0] in component and pair[1] in component) and not (pair[1] == get_partner(pair[0])))}
 
             frame_clusters.append({
-                'segments':   frozenset(component),
+                'segids':   frozenset(component),
                 'interfaces': ifaces,
             })
 
         clusters[frame] = frame_clusters
+
+    return clusters
+
+
+def assign_persistent_cluster_ids(clusters, min_overlap=0.5):
+    """
+    Assigns a persistent 'cluster_id' to each cluster dict, in place, by
+    matching it to a cluster in the previous frame with the highest segid
+    overlap (Jaccard similarity of the 'segids' set). A cluster keeps its id
+    across frames as long as enough of its segids persist; otherwise it is
+    treated as newly formed and gets the next unused id.
+
+    Works on either build_all_clusters or build_all_well_formed_clusters
+    output -- call it separately on each, since a cluster splitting under
+    the well-formed threshold is a distinct identity from the raw cluster.
+
+    Frames are processed in sorted (chronological) order regardless of the
+    dict's iteration order.
+
+    Returns clusters (same object, mutated in place, for chaining).
+    """
+    next_id = 0
+    prev_frame_clusters = []  # list of (cluster_id, segids)
+
+    for frame in sorted(clusters):
+        frame_clusters = clusters[frame]
+        used_ids = set()
+
+        for cluster in frame_clusters:
+            segids = cluster['segids']
+            best_id, best_score = None, 0.0
+
+            for cid, prev_segids in prev_frame_clusters:
+                if cid in used_ids:
+                    continue
+                overlap = len(segids & prev_segids) / len(segids | prev_segids)
+                if overlap > best_score:
+                    best_id, best_score = cid, overlap
+
+            if best_id is not None and best_score >= min_overlap:
+                chosen_id = best_id
+            else:
+                chosen_id = next_id
+                next_id += 1
+
+            used_ids.add(chosen_id)
+            cluster['cluster_id'] = chosen_id
+
+        prev_frame_clusters = [(c['cluster_id'], c['segids']) for c in frame_clusters]
 
     return clusters
 
@@ -503,20 +521,28 @@ def save_cluster_data(pdb_file, traj_file, contact_dir, contacts_per_bond, outpu
     """
     iface_bonds, iface_res_data = parse_frames_computed_cutoffs(pdb_file, traj_file, contact_dir)
     all_clusters = build_all_clusters(iface_bonds, contacts_per_bond)
+    assign_persistent_cluster_ids(all_clusters)
     interface_data = build_interface_angle_data(pdb_file, traj_file, iface_bonds, contacts_per_bond)
     all_well_formed_clusters = build_all_well_formed_clusters(iface_bonds, interface_data, contacts_per_bond)
+    assign_persistent_cluster_ids(all_well_formed_clusters)
 
     print("\nSaving cluster data...\n")
     output_path = f"{output_dir}{traj_file}"
-    output_path = output_path.replace(".dcd", "complete_cluster_data.pkl")
+    output_path = output_path.replace("seg.dcd", "complete_cluster_data.pkl")
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "wb") as f:
         pickle.dump({
-            'iface_bonds':              {k: dict(v) for k, v in iface_bonds.items()},
-            'iface_res_data':           {k: dict(v) for k, v in iface_res_data.items()},
+            # Only the outer defaultdict needs stripping (its factory is a
+            # lambda, which pickle can't serialize) -- the inner
+            # defaultdict(int)/defaultdict(dict) levels are already picklable
+            # since their factories are plain builtins. A shallow dict(...)
+            # avoids deep-copying the entire (multi-GB, for a full capsid)
+            # nested structure a second time right before pickling.
+            'iface_bonds':              dict(iface_bonds),
+            'iface_res_data':           dict(iface_res_data),
             'all_clusters':             all_clusters,
-            'interface_data':           {k: dict(v) for k, v in interface_data.items()},
             'all_well_formed_clusters': all_well_formed_clusters,
+            'interface_data':           dict(interface_data),
             'pdb_file':                 pdb_file,
             'traj_file':                traj_file,
         }, f)

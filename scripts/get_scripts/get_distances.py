@@ -49,7 +49,7 @@ def parse_args():
     p.add_argument('--traj',
                    help='Path to the trajectory to analyze', default=f'/home/kyle/storage/kyle_storage/HBV_enm/trajectory_files/distogram_trajs/cg_A1A2_avg.dcd')
     p.add_argument('--out',
-                   help='Path to the output HDF5 file', default=f'{HBV_ENM_PATH}/scripts/')
+                   help='Directory path to send the plots to', default=f'{HBV_ENM_PATH}/raw_data/plots')
     p.add_argument('--contact_dir',
                    help='Path to directory with all the native contact information',  default=f'{HBV_ENM_PATH}/scripts/contact_files')
     return p.parse_args()
@@ -93,7 +93,7 @@ def build_native_contacts(contactdir):
 # Distances Calculator
 # ---------------------------------------------------------------------------
 
-def get_all_distances(dnames, pdb_file, traj_file, out_path):
+def get_all_distances(dnames, pdb_file, traj_file):
     """
     Loops through all the frames in the trajectory and gets the distances
     between all of the different residues between two dimers in an interface,
@@ -120,7 +120,7 @@ def get_all_distances(dnames, pdb_file, traj_file, out_path):
     print(f"chain1_len: {chain1_len} chain2_len: {chain2_len}")
 
     print(f"Parsing {nframes} frames to gather res pair distances")
-    outfile = f'{out_path}_all_distances.h5'
+    outfile = f'{HBV_ENM_PATH}/scripts/h5_files/_all_distances.h5'
     with h5py.File(outfile, 'w') as f:
         dset = f.create_dataset(
             'distances', shape=(nframes, chain1_len, chain2_len), dtype='float32')
@@ -141,7 +141,7 @@ def get_all_distances(dnames, pdb_file, traj_file, out_path):
     print(f"hd5py file created at: {outfile}")
     return outfile
 
-def get_native_contact_distances(dnames, pdb_file, traj_file, out_path, contact_dir):
+def get_native_contact_distances(dnames, pdb_file, traj_file, contact_dir):
     """
     Does the same as get_all_distances, but restricted to only the residues
     that participate in native contacts for this dimer pair, rather than
@@ -181,7 +181,7 @@ def get_native_contact_distances(dnames, pdb_file, traj_file, out_path, contact_
     chain2_len = int(len(chain2.residues))
     print(f"native contact residues - dimer1: {chain1_len} dimer2: {chain2_len}")
 
-    outfile = f'{out_path}_native_contacts_distances.h5'
+    outfile = f'{HBV_ENM_PATH}/scripts/h5_files/_native_contacts_distances.h5'
     with h5py.File(outfile, 'w') as f:
         dset = f.create_dataset(
             'distances', shape=(nframes, chain1_len, chain2_len), dtype='float32')
@@ -250,13 +250,13 @@ def plot_distance_data(dname, h5_path):
 if __name__ == "__main__":
     args = parse_args()
     # outfile = get_native_contact_distances(args.dnames, args.pdb, args.traj, args.out, args.contact_dir)
-    outfile = get_all_distances(args.dnames, args.pdb, args.traj, args.out)
+    outfile = get_all_distances(args.dnames, args.pdb, args.traj)
     
     # outfile = "scripts/distances.h5"
     plot_distance_data(args.dnames, outfile)
 
-    outfile = get_native_contact_distances(args.dnames, args.pdb, args.traj, args.out, args.contact_dir)
+    outfile = get_native_contact_distances(args.dnames, args.pdb, args.traj, args.contact_dir)
     # outfile = get_all_distances(args.dnames, args.pdb, args.traj, args.out)
     
     # outfile = "scripts/distances.h5"
-    plot_distance_data(args.dnames, outfile)
+    plot_distance_data(args.dnames, outfile, args.out)

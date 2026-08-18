@@ -3,7 +3,7 @@ Input arguements:
     path_to_pkl_file                    -- all cluster information
 
 Output
-    A txt file containing the binding angles which displays the data like so:
+    A csv file containing the binding angles which displays the data like so:
     Frame#, Interface, Binding Angle
 """
 

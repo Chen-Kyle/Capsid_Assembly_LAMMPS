@@ -201,7 +201,7 @@ def plot_dists(iface_res_data, interface_name, output_dir, enative=None):
     plt.show()
 
 
-def plot_clusters_vs_time(clusters, output_dir, enative=None):
+def plot_all_clusters_vs_time(clusters, output_dir, enative=None):
     """
     Two-panel plot across all frames:
       Top    : size of the largest cluster (number of segids)
@@ -248,6 +248,68 @@ def plot_clusters_vs_time(clusters, output_dir, enative=None):
     plt.show()
 
 
+def plot_clusters_vs_time(all_clusters, all_well_formed_clusters, output_dir, enative=None):
+    """
+    Two-panel plot across all frames, comparing all_clusters
+    (build_all_clusters) against all_well_formed_clusters
+    (build_all_well_formed_clusters) on the same axes:
+      Top    : size of the largest cluster (number of segids)
+      Bottom : number of clusters of size >= 2 (bonded assemblies)
+    """
+    def cluster_series(clusters, frames):
+        largest_cluster_size = []
+        n_bonded_clusters    = []
+        for f in frames:
+            frame_clusters = clusters.get(f, [])
+            sizes = [len(c['segments']) for c in frame_clusters]
+            largest_cluster_size.append(max(sizes) if sizes else 0)
+            n_bonded_clusters.append(sum(1 for s in sizes if s >= 2))
+        return largest_cluster_size, n_bonded_clusters
+
+    frames = sorted(set(all_clusters.keys()) | set(all_well_formed_clusters.keys()))
+
+    all_largest, all_n_bonded = cluster_series(all_clusters, frames)
+    wf_largest,  wf_n_bonded  = cluster_series(all_well_formed_clusters, frames)
+
+    all_largest  = pd.Series(all_largest,  index=frames)
+    all_n_bonded = pd.Series(all_n_bonded, index=frames)
+    wf_largest   = pd.Series(wf_largest,   index=frames)
+    wf_n_bonded  = pd.Series(wf_n_bonded,  index=frames)
+
+    window = max(1, len(frames) // 50)
+    all_largest_smooth  = all_largest.rolling(window=window,  center=True, min_periods=1).mean()
+    all_n_bonded_smooth = all_n_bonded.rolling(window=window, center=True, min_periods=1).mean()
+    wf_largest_smooth   = wf_largest.rolling(window=window,   center=True, min_periods=1).mean()
+    wf_n_bonded_smooth  = wf_n_bonded.rolling(window=window,  center=True, min_periods=1).mean()
+
+    _, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 8), sharex=True)
+
+    ax1.plot(frames, all_largest,        linewidth=0.5, alpha=0.25, color='steelblue')
+    ax1.plot(frames, all_largest_smooth, linewidth=1.8, alpha=0.9,  color='steelblue', label='All clusters')
+    ax1.plot(frames, wf_largest,         linewidth=0.5, alpha=0.25, color='seagreen')
+    ax1.plot(frames, wf_largest_smooth,  linewidth=1.8, alpha=0.9,  color='seagreen',  label='Well-formed clusters')
+    ax1.set_ylabel("Largest Cluster Size\n(# of segids)", fontsize=11, fontweight='bold')
+    enative_str = f" — Enative={enative}" if enative is not None else ""
+    ax1.set_title(f"Cluster Assembly vs Time{enative_str}", fontsize=13, fontweight='bold', pad=12)
+    ax1.grid(True, alpha=0.3, linestyle='--')
+    ax1.legend(loc='upper left', fontsize=9)
+
+    ax2.plot(frames, all_n_bonded,        linewidth=0.5, alpha=0.25, color='darkorange')
+    ax2.plot(frames, all_n_bonded_smooth, linewidth=1.8, alpha=0.9,  color='darkorange', label='All clusters')
+    ax2.plot(frames, wf_n_bonded,         linewidth=0.5, alpha=0.25, color='indianred')
+    ax2.plot(frames, wf_n_bonded_smooth,  linewidth=1.8, alpha=0.9,  color='indianred',  label='Well-formed clusters')
+    ax2.set_ylabel("Number of Bonded\nClusters (size ≥ 2)", fontsize=11, fontweight='bold')
+    ax2.set_xlabel("Frame", fontsize=11, fontweight='bold')
+    ax2.grid(True, alpha=0.3, linestyle='--')
+    ax2.legend(loc='upper left', fontsize=9)
+
+    plt.tight_layout()
+    out = f"{output_dir}/clusters_vs_time_comparison.png"
+    plt.savefig(out, dpi=150, bbox_inches='tight')
+    print(f"Saved to {out}")
+    plt.show()
+
+
 if __name__ == "__main__":
     args = parse_args()
     data = load_pickle(args.file)
@@ -260,7 +322,7 @@ if __name__ == "__main__":
             1: ("get_probability",       lambda: get_probability(data['iface_bonds'], contacts_per_bond=10)),
             2: ("plot_iface_contacts",   lambda: plot_iface_contacts(data['iface_bonds'], args.output_dir, enative)),
             3: ("plot_dists",            lambda: plot_dists(data['iface_res_data'], None, args.output_dir, enative)),
-            4: ("plot_clusters_vs_time", lambda: plot_clusters_vs_time(data['clusters'], args.output_dir, enative)),
+            4: ("plot_clusters_vs_time", lambda: plot_clusters_vs_time(data['all_clusters'], data['all_well_formed_clusters'], args.output_dir, enative)),
         }
         for n, (name, fn) in functions.items():
             run = input(f"[{n}] {name} — run? (y/n): ")

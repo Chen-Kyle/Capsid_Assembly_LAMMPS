@@ -1,15 +1,20 @@
 """
-Plots the spike angle distribution grouped by dimer site (A/B/C/D site),
-same as get_spike_angle.py's plot_spike_angle_data -- but reads directly
-from a complete_cluster_data.pkl produced by full_traj_analysis.py, which
-already has the spike angle for every active interface at every frame in
-pkl_data['interface_data'], instead of recomputing it from the trajectory.
+Plots a histogram using the data from the csv file inputted
+Good for using on the outputs of:
+ - get_dihedrals.py
+ - get_binding_angles.py
+ - get_spike_angles.py
+
+Input arguements:
+    path_to_csv_file               -- csv containing frame#, interface/dimer, value
+
+Output
+    A histogram of relative frequency which labels its axes automatically
+    from the header of the csv file. The figure is then saved to the output_dir
 """
 
 import os
-import re
 import argparse
-import pickle
 from collections import defaultdict
 import pandas as pd
 import numpy as np
@@ -55,13 +60,6 @@ def format_chain_name(segids):
 def normalize_string(s):
     return s.lower().replace(' ', '_')
 
-def get_enative(path):
-    """
-    Extracts the Enative float from a file path containing 'Enative=<value>'.
-    """
-    match = re.search(r'Enative=([0-9]+(?:\.[0-9]+)?)', path)
-    return float(match.group(1)) if match else None
-
 
 # ---------------------------------------------------------------------------
 # Core Functions
@@ -84,7 +82,7 @@ def build_histogram_data(df):
 
     return histogram_data
 
-def plot_histogram_data(plotting_data, csv_data_frame, output_dir):
+def plot_histogram_data(plotting_data, csv_data_frame, output_dir, csv_path):
     """
     Plots the data and automatically renames the title and axes based
     off of the header
@@ -109,10 +107,11 @@ def plot_histogram_data(plotting_data, csv_data_frame, output_dir):
     headers = csv_data_frame.columns.tolist()
     ax.set_xlabel(f"{headers[2]} (rads)", fontsize=14)
     ax.set_ylabel('Relative Frequency', fontsize=14)
-    # enative_str = f' — Enative={enative}' if enative is not None else ''
     ax.set_title(f'{headers[2]} Distribution by {headers[1]}', fontsize=18)
     ax.legend(fontsize=12)
-    fig.tight_layout()
+    ax.tick_params(axis='both', labelsize=12)
+    fig.tight_layout(rect=(0, 0.08, 1, 1))
+    fig.text(0.5, 0.02, f"Source: {csv_path}", ha='center', fontsize=8, color='gray')
 
     out_label = normalize_string(headers[2])
     out_path = f"{output_dir}/{out_label}_histogram.png"
@@ -129,4 +128,4 @@ if __name__ == '__main__':
     args = parse_args()
     csv_data = pd.read_csv(args.csv)
     plotting_data = build_histogram_data(csv_data)
-    plot_histogram_data(plotting_data, csv_data, args.output_dir)
+    plot_histogram_data(plotting_data, csv_data, args.output_dir, args.csv)

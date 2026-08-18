@@ -1,3 +1,16 @@
 trajectory_files/
 .claude/
 lbf/
+raw_data/
+data_from_carolina/
+scripts/lattice_pdbs
+scripts/lammps_out
+scripts/minimized.lammps
+scripts/minimized.lammpstrj
+scripts/log.lammps
+scripts/seg_final.lammps
+scripts/seg.restart
+snapshots/
+__pycache__/
+*.pyc
+

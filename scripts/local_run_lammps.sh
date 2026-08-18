@@ -22,10 +22,10 @@
 # Number of seeds passed as first argument (default 5)
 nseed=1
 
-PDB="${HBV_ENM_PATH}/scripts/lattice_pdbs/lattice=cubic_Ndimers=20.pdb" #"important_oligomer_pdbs/cg_ABCD_separate.pdb"
+PDB="${HBV_ENM_PATH}/scripts/important_oligomer_pdbs/abcd_capsid.pdb"
 output_dir="${HBV_ENM_PATH}/scripts/lammps_out"
-Enative_vals=(1.0)
-nsteps=1000000
+Enative=0.5
+nsteps=10000000
 #nsteps=100000000
 
 # ---------------------------------------------------------------------------
@@ -36,7 +36,7 @@ nsteps=1000000
 echo "$(printf '%0.s-' {1..100})"
 echo -e "\npython generate_lammps_data.py --pdb ${PDB} --output_dir ${output_dir} --Enative ${Enative}\n"
 echo "$(printf '%0.s-' {1..100})"
-python generate_lammps_data.py  \
+python ${HBV_ENM_PATH}/scripts/generate_lammps_data.py  \
     --pdb        "${PDB}"       \
     --output_dir "${output_dir}"\
     --Enative    "${Enative}"   \
@@ -44,10 +44,13 @@ python generate_lammps_data.py  \
 # Runs the LAMMPS simulation
 echo -e "Finished running generate_lammps_data.py\n"
 echo "$(printf '%0.s-' {1..100})"
-echo -e "\nmpirun -n 8 lmp -in lammps_oligomer.in -var output_dir ${output_dir} -var nsteps ${nsteps}\n"
+echo -e "\nmpirun -n 1 lmp -in lammps_oligomer.in -var output_dir ${output_dir} -var nsteps ${nsteps}\n"
 echo "$(printf '%0.s-' {1..100})"
-time lmp -in lammps_oligomer.in   \
+time lmp -in ${HBV_ENM_PATH}/scripts/lammps_oligomer.in   \
     -var output_dir ${output_dir} \
     -var nsteps ${nsteps}         \
 
+echo -e "Running full_traj_analysis.py"
+echo -e "python full_traj_analysis.py --pdb ${PDB} --traj ${output_dir}/seg.dcd"
+python full_traj_analysis.py --pdb ${PDB} --traj ${output_dir}/seg.dcd
 echo "All runs complete."

@@ -46,7 +46,7 @@ nsteps=${4:-100000000}
 
 # Output directory
 output_dir_toplevel=${5:-"${SCRATCH}/HBV_enm/Enative=${Enative}_seed=${seed}"}
-use_job_id=${6:-"no"}
+use_job_id=${6:-"yes"}
 if [ "${use_job_id}" = "yes" ]; then
     output_dir="${output_dir_toplevel}/${SLURM_JOB_ID}"
 else
